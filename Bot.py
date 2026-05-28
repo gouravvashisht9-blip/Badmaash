@@ -3,18 +3,16 @@ import os
 import ccxt
 import time
 import threading
-import pandas as pd
-import pandas_ta as ta
 from flask import Flask
 
 # --- Setup ---
 TOKEN = os.environ.get('TELEGRAM_TOKEN')
-CHAT_ID = os.environ.get('CHAT_ID') # Apni Chat ID environment variable mein set kar lena
+CHAT_ID = os.environ.get('CHAT_ID')
 bot = telebot.TeleBot(TOKEN)
 exchange = ccxt.binance()
+# Market load karna zaroori hai
 exchange.load_markets()
 
-# Poori 80 Coins ki list
 coins = [
     'BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT', 'ADA/USDT', 'DOT/USDT', 'MATIC/USDT', 'LINK/USDT', 'UNI/USDT', 'AVAX/USDT',
     'LTC/USDT', 'BNB/USDT', 'XLM/USDT', 'DOGE/USDT', 'SHIB/USDT', 'TRX/USDT', 'ATOM/USDT', 'NEAR/USDT', 'FIL/USDT', 'ALGO/USDT',
@@ -26,30 +24,36 @@ coins = [
     'HNT/USDT', 'CELO/USDT', 'ONE/USDT', 'IOTX/USDT', 'CTSI/USDT', 'LSK/USDT', 'BTS/USDT', 'ARDR/USDT', 'ZEN/USDT', 'STX/USDT'
 ]
 
-# --- God Bot Core Logic ---
-def get_indicators(coin):
-    bars = exchange.fetch_ohlcv(coin, timeframe='15m', limit=50)
-    df = pd.DataFrame(bars, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-    df['RSI'] = ta.rsi(df['close'], length=14)
-    df['EMA_20'] = ta.ema(df['close'], length=20)
-    return df.iloc[-1]
+# --- Calculation Logic (No extra libraries needed) ---
+def get_rsi(prices, period=14):
+    if len(prices) < period + 1: return 50
+    deltas = [prices[i+1] - prices[i] for i in range(len(prices)-1)]
+    gains = [d if d > 0 else 0 for d in deltas]
+    losses = [-d if d < 0 else 0 for d in deltas]
+    avg_gain = sum(gains[-period:]) / period
+    avg_loss = sum(losses[-period:]) / period
+    if avg_loss == 0: return 100
+    rs = avg_gain / avg_loss
+    return 100 - (100 / (1 + rs))
 
+# --- Monitoring ---
 def check_market():
     while True:
         for coin in coins:
             try:
-                data = get_indicators(coin)
-                # Strategy: RSI < 35 (Sasta) + Price > EMA (Trend) + High Volume
-                if data['RSI'] < 35 and data['volume'] > 50000:
-                    bot.send_message(CHAT_ID, f"🚀 GOD ALERT: {coin}\nPrice: {data['close']}\nRSI: {data['RSI']:.2f}\nAction: BUY")
-                time.sleep(1) # Har coin ke liye delay
-            except:
+                ohlcv = exchange.fetch_ohlcv(coin, '15m', limit=20)
+                closes = [bar[4] for bar in ohlcv]
+                rsi = get_rsi(closes)
+                if rsi < 35:
+                    bot.send_message(CHAT_ID, f"🚀 GOD ALERT: {coin}\nRSI: {rsi:.2f}\nPrice: {closes[-1]}")
+                time.sleep(2)
+            except Exception:
                 continue
 
 # --- Bot Commands ---
 @bot.message_handler(commands=['status'])
 def status(message):
-    bot.reply_to(message, f"God Bot is running!\nTracking {len(coins)} coins.\nStatus: RSI/EMA Strategy Active.")
+    bot.reply_to(message, f"God Bot Active. Monitoring {len(coins)} coins.")
 
 @bot.message_handler(commands=['price'])
 def get_price(message):
@@ -58,12 +62,12 @@ def get_price(message):
         ticker = exchange.fetch_ticker(coin)
         bot.reply_to(message, f"{coin} Price: ${ticker['last']}")
     except:
-        bot.reply_to(message, "Error: Invalid coin or format.")
+        bot.reply_to(message, "Invalid Coin.")
 
-# --- Server & Main ---
+# --- Server & Run ---
 app = Flask(__name__)
 @app.route('/')
-def index(): return "God Bot Active"
+def index(): return "Bot is Alive"
 
 if __name__ == '__main__':
     threading.Thread(target=lambda: app.run(host='0.0.0.0', port=10000)).start()
