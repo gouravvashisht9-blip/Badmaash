@@ -1,65 +1,55 @@
+import telebot
+import os
 import ccxt
 import time
-import requests
-import os
-import threading
-import telebot
-from flask import Flask
 
-# --- CONFIG ---
-TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN')
-CHAT_ID = '8812437138'
+# --- Setup ---
+TOKEN = os.environ.get('TELEGRAM_TOKEN')
+bot = telebot.TeleBot(TOKEN)
 exchange = ccxt.binance()
-bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
-# Coins list
-coins = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT', 'XRP/USDT', 'ADA/USDT', 'AVAX/USDT', 'UNI/USDT', 'SHIB/USDT', 'PEPE/USDT']
-active_trades = {}
+# Tumhari 80 coins ki list (Yahan apne coins check kar lena)
+coins = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT', 'ADA/USDT', 'DOT/USDT', 'MATIC/USDT', 'LINK/USDT', 'UNI/USDT', 'AVAX/USDT'] 
 
-# --- 1. DUMMY WEB SERVER (Port Error Fix) ---
-app = Flask(__name__)
-@app.route('/')
-def home():
-    return "Bot is alive!"
-
-def run_web():
-    port = int(os.environ.get('PORT', 8080))
-    app.run(host='0.0.0.0', port=port)
-
-# --- 2. INTERACTION (Telegram Bot) ---
-@bot.message_handler(commands=['status'])
+# --- Commands ---
+@bot.message_handler(commands=['start', 'status'])
 def status(message):
-    bot.reply_to(message, f"Bot is running! Active trades: {len(active_trades)}")
+    bot.reply_to(message, f"Bot is running! Full Secure Interactive Mode.\nTracking {len(coins)} coins.\nActive trades: 0")
 
+@bot.message_handler(commands=['price'])
+def get_price(message):
+    try:
+        parts = message.text.split()
+        if len(parts) > 1:
+            coin = parts[1].upper()
+            ticker = exchange.fetch_ticker(coin)
+            bot.reply_to(message, f"{coin} Price: ${ticker['last']}")
+        else:
+            bot.reply_to(message, "Please specify a coin, e.g., /price BTC/USDT")
+    except Exception as e:
+        bot.reply_to(message, "Error: Invalid coin or check format.")
+
+# --- Main Logic ---
 def run_bot():
-    bot.infinity_polling()
+    print("Bot Started - Full Secure Interactive Mode.")
+    # Yahan tumhara main trading loop aayega
+    while True:
+        try:
+            # Yahan tumhara logic chalta rahega
+            time.sleep(10)
+        except Exception as e:
+            print(f"Error in loop: {e}")
+            time.sleep(10)
 
-# --- 3. TRADING LOGIC ---
-def send_msg(msg):
-    try: bot.send_message(CHAT_ID, msg)
-    except: pass
-
-def get_indicators(coin):
-    try:
-        ohlcv = exchange.fetch_ohlcv(coin, timeframe='1h', limit=200)
-        closes = [x[4] for x in ohlcv]
-        curr = closes[-1]
-        ema200 = sum(closes[-200:]) / 200
-        return curr, ema200, True 
-    except: return 0, 0, False
-
-# --- STARTUP ---
-threading.Thread(target=run_web, daemon=True).start()
-threading.Thread(target=run_bot, daemon=True).start()
-
-send_msg("Bot Started - Full Secure Interactive Mode.")
-
-while True:
-    try:
-        for coin in coins:
-            curr, ema, breakout = get_indicators(coin)
-            # Tera trading logic yahan...
-            time.sleep(2)
-        time.sleep(60)
-    except:
-        time.sleep(60)
+if __name__ == '__main__':
+    # Flask dummy server for Render
+    import threading
+    from flask import Flask
+    app = Flask(__name__)
+    @app.route('/')
+    def index(): return "Bot is Alive"
+    threading.Thread(target=lambda: app.run(host='0.0.0.0', port=10000)).start()
+    
+    # Bot start
+    bot.polling(none_stop=True)
+    
