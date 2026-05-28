@@ -8,10 +8,22 @@ from flask import Flask
 # --- Setup ---
 TOKEN = os.environ.get('TELEGRAM_TOKEN')
 CHAT_ID = os.environ.get('CHAT_ID')
+API_KEY = os.environ.get('BINANCE_API_KEY')
+API_SECRET = os.environ.get('BINANCE_SECRET_KEY')
+
 bot = telebot.TeleBot(TOKEN)
-exchange = ccxt.binance()
-# Market load karna zaroori hai
-exchange.load_markets()
+
+# Binance Setup with Proxy
+exchange = ccxt.binance({
+    'apiKey': API_KEY,
+    'secret': API_SECRET,
+    'enableRateLimit': True,
+    'options': {'defaultType': 'spot'},
+    'proxies': {
+        'http': 'http://185.199.229.156:7497',
+        'https': 'http://185.199.229.156:7497',
+    }
+})
 
 coins = [
     'BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT', 'ADA/USDT', 'DOT/USDT', 'MATIC/USDT', 'LINK/USDT', 'UNI/USDT', 'AVAX/USDT',
@@ -24,7 +36,6 @@ coins = [
     'HNT/USDT', 'CELO/USDT', 'ONE/USDT', 'IOTX/USDT', 'CTSI/USDT', 'LSK/USDT', 'BTS/USDT', 'ARDR/USDT', 'ZEN/USDT', 'STX/USDT'
 ]
 
-# --- Calculation Logic (No extra libraries needed) ---
 def get_rsi(prices, period=14):
     if len(prices) < period + 1: return 50
     deltas = [prices[i+1] - prices[i] for i in range(len(prices)-1)]
@@ -36,38 +47,33 @@ def get_rsi(prices, period=14):
     rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
 
-# --- Monitoring ---
 def check_market():
     while True:
         for coin in coins:
             try:
                 ohlcv = exchange.fetch_ohlcv(coin, '15m', limit=20)
                 closes = [bar[4] for bar in ohlcv]
+                volumes = [bar[5] for bar in ohlcv]
+                
                 rsi = get_rsi(closes)
-                if rsi < 35:
-                    bot.send_message(CHAT_ID, f"🚀 GOD ALERT: {coin}\nRSI: {rsi:.2f}\nPrice: {closes[-1]}")
+                avg_volume = sum(volumes[:-1]) / len(volumes[:-1]) if len(volumes) > 1 else 1
+                current_volume = volumes[-1]
+
+                # Whale + RSI Logic
+                if rsi < 35 and current_volume > (avg_volume * 3):
+                    bot.send_message(CHAT_ID, f"🐋 WHALE & GOD ALERT: {coin}\nRSI: {rsi:.2f}\nPrice: {closes[-1]}\nVolume Spike: {current_volume/avg_volume:.1f}x")
+                
                 time.sleep(2)
             except Exception:
                 continue
 
-# --- Bot Commands ---
 @bot.message_handler(commands=['status'])
 def status(message):
-    bot.reply_to(message, f"God Bot Active. Monitoring {len(coins)} coins.")
+    bot.reply_to(message, "Bot is fully operational (Whale + RSI active).")
 
-@bot.message_handler(commands=['price'])
-def get_price(message):
-    try:
-        coin = message.text.split()[1].upper()
-        ticker = exchange.fetch_ticker(coin)
-        bot.reply_to(message, f"{coin} Price: ${ticker['last']}")
-    except:
-        bot.reply_to(message, "Invalid Coin.")
-
-# --- Server & Run ---
 app = Flask(__name__)
 @app.route('/')
-def index(): return "Bot is Alive"
+def index(): return "Bot Online"
 
 if __name__ == '__main__':
     threading.Thread(target=lambda: app.run(host='0.0.0.0', port=10000)).start()
