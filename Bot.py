@@ -69,6 +69,13 @@ def home():
 
     return "BOT ACTIVE"
 
+def run_flask():
+
+    app.run(
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", 10000))
+    )
+
 # =====================================================
 # COMMANDS
 # =====================================================
@@ -364,7 +371,7 @@ def send_signal(
     )
 
 # =====================================================
-# MAIN ENGINE
+# MARKET ANALYZER
 # =====================================================
 
 def analyze_market():
@@ -527,18 +534,7 @@ def analyze_market():
             time.sleep(20)
 
 # =====================================================
-# FLASK THREAD
-# =====================================================
-
-def run_flask():
-
-    app.run(
-        host='0.0.0.0',
-        port=int(os.environ.get("PORT", 10000))
-    )
-
-# =====================================================
-# MAIN START
+# START BOT
 # =====================================================
 
 if __name__ == "__main__":
@@ -553,10 +549,10 @@ if __name__ == "__main__":
         daemon=True
     ).start()
 
-    print("BOT POLLING STARTED")
+    print("BOT STARTED")
 
-    bot.infinity_polling(
-        timeout=30,
-        long_polling_timeout=30,
-        skip_pending=True
-    )
+    bot.polling(
+        none_stop=True,
+        interval=1,
+        timeout=20
+        )
