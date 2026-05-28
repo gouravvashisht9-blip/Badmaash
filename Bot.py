@@ -1,7 +1,7 @@
 # =========================================================
-# ADVANCED KUCOIN AI SIGNAL BOT
-# FINAL STABLE VERSION
-# Render + GitHub Ready
+# KUCOIN AI SIGNAL BOT
+# WEBHOOK VERSION
+# RENDER + GITHUB READY
 # =========================================================
 
 import os
@@ -13,7 +13,7 @@ import requests
 import threading
 import pandas as pd
 
-from flask import Flask
+from flask import Flask, request
 
 # =========================================================
 # CONFIG
@@ -21,6 +21,7 @@ from flask import Flask
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 
 TIMEFRAME = '15m'
 HIGHER_TIMEFRAME = '1h'
@@ -40,10 +41,6 @@ bot = telebot.TeleBot(
     parse_mode='Markdown'
 )
 
-# REMOVE OLD WEBHOOK
-bot.remove_webhook()
-time.sleep(1)
-
 # =========================================================
 # KUCOIN
 # =========================================================
@@ -60,7 +57,7 @@ exchange = ccxt.kucoin({
 exchange.load_markets()
 
 # =========================================================
-# BEST COINS
+# COINS
 # =========================================================
 
 coins = [
@@ -374,7 +371,7 @@ def send_signal(
         logging.error(f"Telegram Error: {e}")
 
 # =========================================================
-# MAIN ENGINE
+# MARKET ENGINE
 # =========================================================
 
 def analyze_market():
@@ -384,10 +381,6 @@ def analyze_market():
         try:
 
             logging.info("Scanning Market")
-
-            # =====================================
-            # FEAR & GREED FILTER
-            # =====================================
 
             sentiment = get_market_sentiment()
 
@@ -400,10 +393,6 @@ def analyze_market():
                 time.sleep(300)
 
                 continue
-
-            # =====================================
-            # BTC SAFETY
-            # =====================================
 
             btc = exchange.fetch_ohlcv(
                 'BTC/USDT',
@@ -425,10 +414,6 @@ def analyze_market():
 
                 continue
 
-            # =====================================
-            # COIN LOOP
-            # =====================================
-
             for symbol in coins:
 
                 try:
@@ -440,19 +425,11 @@ def analyze_market():
 
                         continue
 
-                    # =============================
-                    # MAIN TF DATA
-                    # =============================
-
                     ohlcv = exchange.fetch_ohlcv(
                         symbol,
                         TIMEFRAME,
                         limit=150
                     )
-
-                    # =============================
-                    # HIGHER TF DATA
-                    # =============================
 
                     htf = exchange.fetch_ohlcv(
                         symbol,
@@ -469,10 +446,6 @@ def analyze_market():
                     htf_closes = [x[4] for x in htf]
 
                     price = closes[-1]
-
-                    # =============================
-                    # INDICATORS
-                    # =============================
 
                     rsi = calculate_rsi(closes)
 
@@ -500,19 +473,11 @@ def analyze_market():
                         200
                     )
 
-                    # =============================
-                    # TREND FILTER
-                    # =============================
-
                     trend_ok = (
                         ema50 > ema200 and
                         htf_ema50 > htf_ema200 and
                         price > ema50
                     )
-
-                    # =============================
-                    # VOLUME FILTERS
-                    # =============================
 
                     avg_volume = (
                         sum(volumes[-15:-1]) / 14
@@ -528,17 +493,9 @@ def analyze_market():
                         avg_volume * 4
                     )
 
-                    # =============================
-                    # FAKE PUMP FILTER
-                    # =============================
-
                     fake_pump = fake_pump_detected(
                         ohlcv
                     )
-
-                    # =============================
-                    # FINAL SIGNAL
-                    # =============================
 
                     signal = (
                         rsi < RSI_LIMIT and
@@ -590,7 +547,22 @@ app = Flask(__name__)
 @app.route('/')
 def home():
 
-    return "ADVANCED KUCOIN AI BOT ACTIVE"
+    return "KUCOIN AI WEBHOOK BOT ACTIVE"
+
+# =========================================================
+# WEBHOOK ROUTE
+# =========================================================
+
+@app.route(f"/{TOKEN}", methods=['POST'])
+def webhook():
+
+    json_str = request.get_data().decode('UTF-8')
+
+    update = telebot.types.Update.de_json(json_str)
+
+    bot.process_new_updates([update])
+
+    return "OK", 200
 
 # =========================================================
 # START
@@ -598,20 +570,22 @@ def home():
 
 if __name__ == '__main__':
 
-    logging.info("Starting Bot")
+    logging.info("Starting Webhook Bot")
 
-    threading.Thread(
-        target=lambda: app.run(
-            host='0.0.0.0',
-            port=10000
-        ),
-        daemon=True
-    ).start()
+    bot.remove_webhook()
+
+    time.sleep(2)
+
+    bot.set_webhook(
+        url=f"{WEBHOOK_URL}/{TOKEN}"
+    )
 
     threading.Thread(
         target=analyze_market,
         daemon=True
     ).start()
 
-    bot.infinity_polling(none_stop=True, skip_pending=True)
-    
+    app.run(
+        host='0.0.0.0',
+        port=10000
+                     )
