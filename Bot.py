@@ -1,15 +1,14 @@
 import os
 import time
 import telebot
-import ccxt
-import logging
-import requests
 import threading
+import logging
 import traceback
+import requests
+import ccxt
 import pandas as pd
 
 from flask import Flask
-from telebot.apihelper import ApiTelegramException
 
 # =====================================================
 # CONFIG
@@ -28,73 +27,98 @@ RSI_LIMIT = 33
 ADX_LIMIT = 20
 
 # =====================================================
-# TELEGRAM
+# TELEGRAM BOT
 # =====================================================
 
 bot = telebot.TeleBot(
     TOKEN,
-    parse_mode='Markdown'
+    parse_mode="Markdown"
 )
 
-# REMOVE OLD WEBHOOK
+# =====================================================
+# REMOVE WEBHOOK
+# =====================================================
+
 try:
+
     bot.remove_webhook()
-except ApiTelegramException:
-    pass
+
 except Exception:
+
     pass
 
 time.sleep(2)
 
 # =====================================================
-# COMMAND HANDLERS
+# LOGGING
 # =====================================================
 
-@bot.message_handler(commands=['start', 'status'])
-def send_status(message):
-
-    try:
-
-        status_msg = (
-            "🤖 *BOT STATUS REPORT*\n\n"
-            "✅ *Market Scanner:* Active\n"
-            "📈 *Strategy:* RSI < 33 | ADX > 20\n"
-            "🐋 *Whale Detection:* Enabled\n"
-            "⏳ *Market Scan:* Running 24/7\n\n"
-            "🚨 Perfect signal milte hi alert yahan aayega."
-        )
-
-        bot.reply_to(
-            message,
-            status_msg,
-            parse_mode='Markdown'
-        )
-
-    except Exception as e:
-
-        logging.error(
-            f"Command Error: {e}"
-        )
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 
 # =====================================================
-# STARTUP TEST MESSAGE
+# FLASK
+# =====================================================
+
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+
+    return "BOT ACTIVE"
+
+# =====================================================
+# COMMANDS
+# =====================================================
+
+@bot.message_handler(commands=['start'])
+def start_command(message):
+
+    bot.reply_to(
+        message,
+        "✅ *BOT ACTIVE*\n\n🚀 AI Market Scanner Running 24/7",
+        parse_mode="Markdown"
+    )
+
+@bot.message_handler(commands=['status'])
+def status_command(message):
+
+    status_msg = (
+        "🤖 *BOT STATUS REPORT*\n\n"
+        "✅ *Scanner:* Active\n"
+        "📈 *Strategy:* RSI < 33 | ADX > 20\n"
+        "🐋 *Whale Detection:* Enabled\n"
+        "⏳ *Scanning:* Live Market 24/7\n\n"
+        "🚨 Signal milte hi alert aayega."
+    )
+
+    bot.reply_to(
+        message,
+        status_msg,
+        parse_mode="Markdown"
+    )
+
+# =====================================================
+# STARTUP MESSAGE
 # =====================================================
 
 try:
 
     bot.send_message(
         CHAT_ID,
-        "✅ BOT CONNECTED SUCCESSFULLY\n📡 AI Scanner Starting..."
+        "✅ BOT STARTED SUCCESSFULLY\n📡 Market Scanner Online"
     )
 
-    print("MESSAGE SENT SUCCESSFULLY")
+    print("TELEGRAM CONNECTED")
 
 except Exception as e:
 
     print(f"TELEGRAM ERROR: {e}")
 
 # =====================================================
-# KUCOIN
+# KUCOIN EXCHANGE
 # =====================================================
 
 exchange = ccxt.kucoin({
@@ -111,18 +135,25 @@ exchange = ccxt.kucoin({
 # =====================================================
 
 coins = [
+
     'BTC/USDT','ETH/USDT','SOL/USDT','XRP/USDT',
     'ADA/USDT','DOGE/USDT','AVAX/USDT','LINK/USDT',
-    'DOT/USDT','POL/USDT','ATOM/USDT','NEAR/USDT',
-    'FIL/USDT','LTC/USDT','TRX/USDT','ETC/USDT',
-    'ICP/USDT','HBAR/USDT','S/USDT','SAND/USDT',
+    'DOT/USDT','ATOM/USDT','NEAR/USDT','FIL/USDT',
+    'LTC/USDT','TRX/USDT','ETC/USDT','ICP/USDT',
+    'HBAR/USDT','SAND/USDT','AAVE/USDT','CRV/USDT',
 
-    'AAVE/USDT','CRV/USDT','SNX/USDT',
-    'SUSHI/USDT','GRT/USDT','CHZ/USDT',
+    'SNX/USDT','SUSHI/USDT','GRT/USDT','CHZ/USDT',
     'RUNE/USDT','THETA/USDT','LRC/USDT','DASH/USDT',
-
     'ZEC/USDT','NEO/USDT','XMR/USDT','IOTA/USDT',
-    'ICX/USDT','HNT/USDT','IOTX/USDT','STX/USDT'
+    'ICX/USDT','HNT/USDT','IOTX/USDT','STX/USDT',
+
+    'ARB/USDT','OP/USDT','APT/USDT','INJ/USDT',
+    'SEI/USDT','TIA/USDT','PEPE/USDT','BONK/USDT',
+    'WIF/USDT','FLOKI/USDT','RNDR/USDT','JUP/USDT',
+
+    'PYTH/USDT','STRK/USDT','BLUR/USDT','DYDX/USDT',
+    'GMX/USDT','SUI/USDT','CFX/USDT','MASK/USDT',
+    'HOOK/USDT','MAGIC/USDT','ACH/USDT','API3/USDT'
 ]
 
 # =====================================================
@@ -130,15 +161,6 @@ coins = [
 # =====================================================
 
 last_alerts = {}
-
-# =====================================================
-# LOGGING
-# =====================================================
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
 
 # =====================================================
 # MARKET SENTIMENT
@@ -189,6 +211,7 @@ def calculate_rsi(prices, period=14):
     value = float(rsi.iloc[-1])
 
     if pd.isna(value):
+
         return 50
 
     return value
@@ -218,9 +241,11 @@ def calculate_atr(ohlcv, period=14):
     )
 
     tr = pd.concat([
+
         df['h'] - df['l'],
         abs(df['h'] - df['c'].shift()),
         abs(df['l'] - df['c'].shift())
+
     ], axis=1).max(axis=1)
 
     atr = tr.rolling(period).mean()
@@ -228,6 +253,7 @@ def calculate_atr(ohlcv, period=14):
     value = float(atr.iloc[-1])
 
     if pd.isna(value):
+
         return 0
 
     return value
@@ -250,9 +276,11 @@ def calculate_adx(ohlcv, period=14):
     minus_dm[minus_dm < 0] = 0
 
     tr = pd.concat([
+
         df['h'] - df['l'],
         abs(df['h'] - df['c'].shift()),
         abs(df['l'] - df['c'].shift())
+
     ], axis=1).max(axis=1)
 
     atr = tr.rolling(period).mean()
@@ -277,12 +305,13 @@ def calculate_adx(ohlcv, period=14):
     value = float(adx.iloc[-1])
 
     if pd.isna(value):
+
         return 0
 
     return value
 
 # =====================================================
-# SIGNAL MESSAGE
+# SIGNAL FUNCTION
 # =====================================================
 
 def send_signal(
@@ -301,18 +330,13 @@ def send_signal(
     tp2 = price + (atr * 4)
     tp3 = price + (atr * 6)
 
-    rr = round(
-        (tp2 - price) /
-        (price - sl),
-        2
-    )
-
     whale_text = (
         "\n🐋 Whale Volume Detected"
         if whale else ""
     )
 
     message = f"""
+
 🚨 *ADVANCED AI SIGNAL*
 
 🪙 {symbol}
@@ -332,7 +356,6 @@ def send_signal(
 
 🛑 SL: `{sl:.5f}`
 
-⚖️ RR: `{rr}`
 """
 
     bot.send_message(
@@ -358,14 +381,14 @@ def analyze_market():
             if sentiment >= 80:
 
                 logging.warning(
-                    "Extreme Greed Market"
+                    "Extreme Greed Detected"
                 )
 
                 time.sleep(300)
 
                 continue
 
-            # BTC PROTECTION
+            # BTC SAFETY FILTER
             btc = exchange.fetch_ohlcv(
                 'BTC/USDT',
                 TIMEFRAME,
@@ -379,14 +402,14 @@ def analyze_market():
             if btc_change < -0.025:
 
                 logging.warning(
-                    "BTC Dump Protection"
+                    "BTC Dump Protection Active"
                 )
 
                 time.sleep(180)
 
                 continue
 
-            # COIN LOOP
+            # COINS LOOP
             for symbol in coins:
 
                 try:
@@ -399,14 +422,13 @@ def analyze_market():
 
                         continue
 
-                    # MAIN TF
+                    # FETCH DATA
                     ohlcv = exchange.fetch_ohlcv(
                         symbol,
                         TIMEFRAME,
                         limit=150
                     )
 
-                    # HIGHER TF
                     htf = exchange.fetch_ohlcv(
                         symbol,
                         HIGHER_TIMEFRAME,
@@ -414,6 +436,7 @@ def analyze_market():
                     )
 
                     if not ohlcv or not htf:
+
                         continue
 
                     closes = [x[4] for x in ohlcv]
@@ -430,31 +453,19 @@ def analyze_market():
 
                     adx = calculate_adx(ohlcv)
 
-                    ema50 = calculate_ema(
-                        closes,
-                        50
-                    )
+                    ema50 = calculate_ema(closes, 50)
+                    ema200 = calculate_ema(closes, 200)
 
-                    ema200 = calculate_ema(
-                        closes,
-                        200
-                    )
-
-                    htf_ema50 = calculate_ema(
-                        htf_closes,
-                        50
-                    )
-
-                    htf_ema200 = calculate_ema(
-                        htf_closes,
-                        200
-                    )
+                    htf_ema50 = calculate_ema(htf_closes, 50)
+                    htf_ema200 = calculate_ema(htf_closes, 200)
 
                     # TREND FILTER
                     trend_ok = (
+
                         ema50 > ema200 and
                         htf_ema50 > htf_ema200 and
                         price > ema50
+
                     )
 
                     # VOLUME FILTER
@@ -474,11 +485,13 @@ def analyze_market():
 
                     # FINAL SIGNAL
                     signal = (
+
                         rsi < RSI_LIMIT and
                         adx > ADX_LIMIT and
                         volume_spike and
                         trend_ok and
                         atr > 0
+
                     )
 
                     if signal:
@@ -493,9 +506,7 @@ def analyze_market():
                             whale
                         )
 
-                        last_alerts[symbol] = (
-                            time.time()
-                        )
+                        last_alerts[symbol] = time.time()
 
                     time.sleep(SCAN_DELAY)
 
@@ -516,54 +527,36 @@ def analyze_market():
             time.sleep(20)
 
 # =====================================================
-# FLASK
+# FLASK THREAD
 # =====================================================
 
-app = Flask(__name__)
+def run_flask():
 
-@app.route('/')
-def home():
-
-    return "BOT ACTIVE"
+    app.run(
+        host='0.0.0.0',
+        port=int(os.environ.get("PORT", 10000))
+    )
 
 # =====================================================
-# START
+# MAIN START
 # =====================================================
 
-if __name__ == '__main__':
+if __name__ == "__main__":
+
+    threading.Thread(
+        target=run_flask,
+        daemon=True
+    ).start()
 
     threading.Thread(
         target=analyze_market,
         daemon=True
     ).start()
 
-    threading.Thread(
-        target=lambda: app.run(
-            host='0.0.0.0',
-            port=10000
-        ),
-        daemon=True
-    ).start()
+    print("BOT POLLING STARTED")
 
-    # ANTI 409 LOOP
-    while True:
-
-        try:
-
-            bot.remove_webhook()
-
-            time.sleep(2)
-
-            bot.infinity_polling(
-                timeout=60,
-                long_polling_timeout=60,
-                skip_pending=True
-            )
-
-        except Exception:
-
-            logging.error(
-                traceback.format_exc()
-            )
-
-            time.sleep(15)
+    bot.infinity_polling(
+        timeout=30,
+        long_polling_timeout=30,
+        skip_pending=True
+    )
