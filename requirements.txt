@@ -1,5 +1,5 @@
-pandas
-telebot
+pytelegrambotapi
 ccxt
-requests
+pandas
 flask
+requests
