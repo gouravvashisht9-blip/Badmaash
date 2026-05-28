@@ -1,9 +1,3 @@
-# =========================================================
-# KUCOIN AI SIGNAL BOT
-# WEBHOOK VERSION
-# RENDER + GITHUB READY
-# =========================================================
-
 import os
 import time
 import telebot
@@ -13,15 +7,14 @@ import requests
 import threading
 import pandas as pd
 
-from flask import Flask, request
+from flask import Flask
 
-# =========================================================
+# =====================================================
 # CONFIG
-# =========================================================
+# =====================================================
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 
 TIMEFRAME = '15m'
 HIGHER_TIMEFRAME = '1h'
@@ -32,18 +25,25 @@ COOLDOWN = 10800
 RSI_LIMIT = 30
 ADX_LIMIT = 20
 
-# =========================================================
+# =====================================================
 # TELEGRAM
-# =========================================================
+# =====================================================
 
 bot = telebot.TeleBot(
     TOKEN,
     parse_mode='Markdown'
 )
 
-# =========================================================
+try:
+    bot.remove_webhook()
+except:
+    pass
+
+time.sleep(2)
+
+# =====================================================
 # KUCOIN
-# =========================================================
+# =====================================================
 
 exchange = ccxt.kucoin({
     'enableRateLimit': True,
@@ -54,11 +54,9 @@ exchange = ccxt.kucoin({
     }
 })
 
-exchange.load_markets()
-
-# =========================================================
+# =====================================================
 # COINS
-# =========================================================
+# =====================================================
 
 coins = [
     'BTC/USDT','ETH/USDT','SOL/USDT','XRP/USDT',
@@ -75,28 +73,24 @@ coins = [
     'ICX/USDT','HNT/USDT','IOTX/USDT','STX/USDT'
 ]
 
-# =========================================================
+# =====================================================
 # MEMORY
-# =========================================================
+# =====================================================
 
 last_alerts = {}
 
-# =========================================================
+# =====================================================
 # LOGGING
-# =========================================================
+# =====================================================
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler("bot.log"),
-        logging.StreamHandler()
-    ]
+    format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
-# =========================================================
-# FEAR & GREED
-# =========================================================
+# =====================================================
+# INDICATORS
+# =====================================================
 
 def get_market_sentiment():
 
@@ -111,200 +105,102 @@ def get_market_sentiment():
             response.json()['data'][0]['value']
         )
 
-    except Exception as e:
-
-        logging.error(f"Sentiment Error: {e}")
+    except:
 
         return 50
-
-# =========================================================
-# RSI
-# =========================================================
 
 def calculate_rsi(prices, period=14):
 
-    try:
+    delta = pd.Series(prices).diff()
 
-        delta = pd.Series(prices).diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
 
-        gain = delta.clip(lower=0)
-        loss = -delta.clip(upper=0)
+    avg_gain = gain.ewm(
+        alpha=1/period,
+        adjust=False
+    ).mean()
 
-        avg_gain = gain.ewm(
-            alpha=1/period,
-            adjust=False
-        ).mean()
+    avg_loss = loss.ewm(
+        alpha=1/period,
+        adjust=False
+    ).mean()
 
-        avg_loss = loss.ewm(
-            alpha=1/period,
-            adjust=False
-        ).mean()
+    rs = avg_gain / avg_loss
 
-        rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
 
-        rsi = 100 - (100 / (1 + rs))
-
-        value = float(rsi.iloc[-1])
-
-        if pd.isna(value):
-            return 50
-
-        return value
-
-    except Exception as e:
-
-        logging.error(f"RSI Error: {e}")
-
-        return 50
-
-# =========================================================
-# EMA
-# =========================================================
+    return float(rsi.iloc[-1])
 
 def calculate_ema(prices, period):
 
-    try:
+    ema = pd.Series(prices).ewm(
+        span=period,
+        adjust=False
+    ).mean()
 
-        ema = pd.Series(prices).ewm(
-            span=period,
-            adjust=False
-        ).mean()
-
-        return float(ema.iloc[-1])
-
-    except Exception as e:
-
-        logging.error(f"EMA Error: {e}")
-
-        return prices[-1]
-
-# =========================================================
-# ATR
-# =========================================================
+    return float(ema.iloc[-1])
 
 def calculate_atr(ohlcv, period=14):
 
-    try:
+    df = pd.DataFrame(
+        ohlcv,
+        columns=['t','o','h','l','c','v']
+    )
 
-        df = pd.DataFrame(
-            ohlcv,
-            columns=['t','o','h','l','c','v']
-        )
+    tr = pd.concat([
+        df['h'] - df['l'],
+        abs(df['h'] - df['c'].shift()),
+        abs(df['l'] - df['c'].shift())
+    ], axis=1).max(axis=1)
 
-        tr = pd.concat([
-            df['h'] - df['l'],
-            abs(df['h'] - df['c'].shift()),
-            abs(df['l'] - df['c'].shift())
-        ], axis=1).max(axis=1)
+    atr = tr.rolling(period).mean()
 
-        atr = tr.rolling(period).mean()
-
-        value = float(atr.iloc[-1])
-
-        if pd.isna(value):
-            return 0
-
-        return value
-
-    except Exception as e:
-
-        logging.error(f"ATR Error: {e}")
-
-        return 0
-
-# =========================================================
-# ADX
-# =========================================================
+    return float(atr.iloc[-1])
 
 def calculate_adx(ohlcv, period=14):
 
-    try:
+    df = pd.DataFrame(
+        ohlcv,
+        columns=['t','o','h','l','c','v']
+    )
 
-        df = pd.DataFrame(
-            ohlcv,
-            columns=['t','o','h','l','c','v']
-        )
+    plus_dm = df['h'].diff()
+    minus_dm = df['l'].diff() * -1
 
-        plus_dm = df['h'].diff()
-        minus_dm = df['l'].diff() * -1
+    plus_dm[plus_dm < 0] = 0
+    minus_dm[minus_dm < 0] = 0
 
-        plus_dm[plus_dm < 0] = 0
-        minus_dm[minus_dm < 0] = 0
+    tr = pd.concat([
+        df['h'] - df['l'],
+        abs(df['h'] - df['c'].shift()),
+        abs(df['l'] - df['c'].shift())
+    ], axis=1).max(axis=1)
 
-        tr = pd.concat([
-            df['h'] - df['l'],
-            abs(df['h'] - df['c'].shift()),
-            abs(df['l'] - df['c'].shift())
-        ], axis=1).max(axis=1)
+    atr = tr.rolling(period).mean()
 
-        atr = tr.rolling(period).mean()
+    plus_di = (
+        100 *
+        (plus_dm.rolling(period).mean() / atr)
+    )
 
-        plus_di = (
-            100 *
-            (plus_dm.rolling(period).mean() / atr)
-        )
+    minus_di = (
+        100 *
+        (minus_dm.rolling(period).mean() / atr)
+    )
 
-        minus_di = (
-            100 *
-            (minus_dm.rolling(period).mean() / atr)
-        )
+    dx = (
+        abs(plus_di - minus_di) /
+        abs(plus_di + minus_di)
+    ) * 100
 
-        dx = (
-            abs(plus_di - minus_di) /
-            abs(plus_di + minus_di)
-        ) * 100
+    adx = dx.rolling(period).mean()
 
-        adx = dx.rolling(period).mean()
+    return float(adx.iloc[-1])
 
-        value = float(adx.iloc[-1])
-
-        if pd.isna(value):
-            return 0
-
-        return value
-
-    except Exception as e:
-
-        logging.error(f"ADX Error: {e}")
-
-        return 0
-
-# =========================================================
-# FAKE PUMP FILTER
-# =========================================================
-
-def fake_pump_detected(ohlcv):
-
-    try:
-
-        candle = ohlcv[-1]
-
-        high = candle[2]
-        low = candle[3]
-
-        open_price = candle[1]
-        close = candle[4]
-
-        total = high - low
-
-        if total == 0:
-            return True
-
-        body = abs(close - open_price)
-
-        ratio = body / total
-
-        return ratio < 0.25
-
-    except Exception as e:
-
-        logging.error(f"Fake Pump Error: {e}")
-
-        return False
-
-# =========================================================
-# SIGNAL MESSAGE
-# =========================================================
+# =====================================================
+# SIGNAL
+# =====================================================
 
 def send_signal(
     symbol,
@@ -322,57 +218,40 @@ def send_signal(
     tp2 = price + (atr * 4)
     tp3 = price + (atr * 6)
 
-    rr = round(
-        (tp2 - price) /
-        (price - sl),
-        2
-    )
-
     whale_text = (
-        "🐋 Whale Volume Detected\n"
+        "\n🐋 Whale Volume Detected"
         if whale else ""
     )
 
     message = f"""
 🚨 *ADVANCED AI SIGNAL*
 
-🪙 *Coin:* `{symbol}`
+🪙 {symbol}
 
-💰 *Entry:* `{price:.5f}`
+💰 Entry: `{price:.5f}`
 
-📉 *RSI:* `{rsi:.2f}`
-📈 *ADX:* `{adx:.2f}`
-😨 *Fear & Greed:* `{sentiment}`
+📉 RSI: `{rsi:.2f}`
+📈 ADX: `{adx:.2f}`
+
+😨 Fear & Greed: `{sentiment}`
 
 {whale_text}
 
-🎯 *TP1:* `{tp1:.5f}`
-🎯 *TP2:* `{tp2:.5f}`
-🎯 *TP3:* `{tp3:.5f}`
+🎯 TP1: `{tp1:.5f}`
+🎯 TP2: `{tp2:.5f}`
+🎯 TP3: `{tp3:.5f}`
 
-🛑 *SL:* `{sl:.5f}`
-
-⚖️ *RR:* `{rr}`
-
-⚠️ Move SL to Entry after TP1.
+🛑 SL: `{sl:.5f}`
 """
 
-    try:
+    bot.send_message(
+        CHAT_ID,
+        message
+    )
 
-        bot.send_message(
-            CHAT_ID,
-            message
-        )
-
-        logging.info(f"Signal Sent: {symbol}")
-
-    except Exception as e:
-
-        logging.error(f"Telegram Error: {e}")
-
-# =========================================================
-# MARKET ENGINE
-# =========================================================
+# =====================================================
+# ENGINE
+# =====================================================
 
 def analyze_market():
 
@@ -386,12 +265,7 @@ def analyze_market():
 
             if sentiment >= 80:
 
-                logging.warning(
-                    "Extreme Greed"
-                )
-
                 time.sleep(300)
-
                 continue
 
             btc = exchange.fetch_ohlcv(
@@ -406,12 +280,7 @@ def analyze_market():
 
             if btc_change < -0.025:
 
-                logging.warning(
-                    "BTC Dump Protection"
-                )
-
                 time.sleep(180)
-
                 continue
 
             for symbol in coins:
@@ -436,9 +305,6 @@ def analyze_market():
                         HIGHER_TIMEFRAME,
                         limit=150
                     )
-
-                    if not ohlcv or not htf:
-                        continue
 
                     closes = [x[4] for x in ohlcv]
                     volumes = [x[5] for x in ohlcv]
@@ -493,17 +359,12 @@ def analyze_market():
                         avg_volume * 4
                     )
 
-                    fake_pump = fake_pump_detected(
-                        ohlcv
-                    )
-
                     signal = (
                         rsi < RSI_LIMIT and
                         adx > ADX_LIMIT and
                         volume_spike and
                         trend_ok and
-                        atr > 0 and
-                        not fake_pump
+                        atr > 0
                     )
 
                     if signal:
@@ -527,65 +388,48 @@ def analyze_market():
                 except Exception as e:
 
                     logging.error(
-                        f"{symbol} Error: {e}"
+                        f"{symbol}: {e}"
                     )
 
-                    time.sleep(5)
+                    time.sleep(3)
 
         except Exception as e:
 
-            logging.error(f"Main Error: {e}")
+            logging.error(e)
 
             time.sleep(20)
 
-# =========================================================
+# =====================================================
 # FLASK
-# =========================================================
+# =====================================================
 
 app = Flask(__name__)
 
 @app.route('/')
 def home():
 
-    return "KUCOIN AI WEBHOOK BOT ACTIVE"
+    return "BOT ACTIVE"
 
-# =========================================================
-# WEBHOOK ROUTE
-# =========================================================
-
-@app.route(f"/{TOKEN}", methods=['POST'])
-def webhook():
-
-    json_str = request.get_data().decode('UTF-8')
-
-    update = telebot.types.Update.de_json(json_str)
-
-    bot.process_new_updates([update])
-
-    return "OK", 200
-
-# =========================================================
+# =====================================================
 # START
-# =========================================================
+# =====================================================
 
 if __name__ == '__main__':
-
-    logging.info("Starting Webhook Bot")
-
-    bot.remove_webhook()
-
-    time.sleep(2)
-
-    bot.set_webhook(
-        url=f"{WEBHOOK_URL}/{TOKEN}"
-    )
 
     threading.Thread(
         target=analyze_market,
         daemon=True
     ).start()
 
-    app.run(
-        host='0.0.0.0',
-        port=10000
-                     )
+    threading.Thread(
+        target=lambda: app.run(
+            host='0.0.0.0',
+            port=10000
+        ),
+        daemon=True
+    ).start()
+
+    bot.infinity_polling(
+        timeout=60,
+        long_polling_timeout=60
+)
