@@ -24,7 +24,7 @@ HIGHER_TIMEFRAME = '1h'
 SCAN_DELAY = 5
 COOLDOWN = 10800
 
-RSI_LIMIT = 30
+RSI_LIMIT = 33
 ADX_LIMIT = 20
 
 # =====================================================
@@ -45,6 +45,23 @@ except Exception:
     pass
 
 time.sleep(2)
+
+# =====================================================
+# STARTUP TEST MESSAGE
+# =====================================================
+
+try:
+
+    bot.send_message(
+        CHAT_ID,
+        "✅ BOT CONNECTED SUCCESSFULLY\n📡 AI Scanner Starting..."
+    )
+
+    print("MESSAGE SENT SUCCESSFULLY")
+
+except Exception as e:
+
+    print(f"TELEGRAM ERROR: {e}")
 
 # =====================================================
 # KUCOIN
