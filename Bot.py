@@ -2,54 +2,71 @@ import telebot
 import os
 import ccxt
 import time
+import threading
+import pandas as pd
+import pandas_ta as ta
+from flask import Flask
 
 # --- Setup ---
 TOKEN = os.environ.get('TELEGRAM_TOKEN')
+CHAT_ID = os.environ.get('CHAT_ID') # Apni Chat ID environment variable mein set kar lena
 bot = telebot.TeleBot(TOKEN)
 exchange = ccxt.binance()
+exchange.load_markets()
 
-# Tumhari 80 coins ki list (Yahan apne coins check kar lena)
-coins = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT', 'ADA/USDT', 'DOT/USDT', 'MATIC/USDT', 'LINK/USDT', 'UNI/USDT', 'AVAX/USDT'] 
+# Poori 80 Coins ki list
+coins = [
+    'BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT', 'ADA/USDT', 'DOT/USDT', 'MATIC/USDT', 'LINK/USDT', 'UNI/USDT', 'AVAX/USDT',
+    'LTC/USDT', 'BNB/USDT', 'XLM/USDT', 'DOGE/USDT', 'SHIB/USDT', 'TRX/USDT', 'ATOM/USDT', 'NEAR/USDT', 'FIL/USDT', 'ALGO/USDT',
+    'VET/USDT', 'ICP/USDT', 'HBAR/USDT', 'FTM/USDT', 'SAND/USDT', 'MANA/USDT', 'AXS/USDT', 'EGLD/USDT', 'EOS/USDT', 'XTZ/USDT',
+    'AAVE/USDT', 'CRV/USDT', 'MKR/USDT', 'COMP/USDT', 'SNX/USDT', 'SUSHI/USDT', 'YFI/USDT', 'GRT/USDT', 'BAT/USDT', 'CHZ/USDT',
+    'ENJ/USDT', 'GALA/USDT', 'RUNE/USDT', 'KAVA/USDT', 'ZIL/USDT', 'THETA/USDT', 'ONT/USDT', 'QTUM/USDT', 'OMG/USDT', 'IOST/USDT',
+    'BAND/USDT', 'WAVES/USDT', 'REN/USDT', 'SKL/USDT', 'OCEAN/USDT', 'ANKR/USDT', 'LRC/USDT', 'BAL/USDT', 'KNC/USDT', 'DASH/USDT',
+    'ZEC/USDT', 'ETC/USDT', 'NEO/USDT', 'XMR/USDT', 'BCH/USDT', 'BSV/USDT', 'IOTA/USDT', 'ICX/USDT', 'SC/USDT', 'RVN/USDT',
+    'HNT/USDT', 'CELO/USDT', 'ONE/USDT', 'IOTX/USDT', 'CTSI/USDT', 'LSK/USDT', 'BTS/USDT', 'ARDR/USDT', 'ZEN/USDT', 'STX/USDT'
+]
 
-# --- Commands ---
-@bot.message_handler(commands=['start', 'status'])
+# --- God Bot Core Logic ---
+def get_indicators(coin):
+    bars = exchange.fetch_ohlcv(coin, timeframe='15m', limit=50)
+    df = pd.DataFrame(bars, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+    df['RSI'] = ta.rsi(df['close'], length=14)
+    df['EMA_20'] = ta.ema(df['close'], length=20)
+    return df.iloc[-1]
+
+def check_market():
+    while True:
+        for coin in coins:
+            try:
+                data = get_indicators(coin)
+                # Strategy: RSI < 35 (Sasta) + Price > EMA (Trend) + High Volume
+                if data['RSI'] < 35 and data['volume'] > 50000:
+                    bot.send_message(CHAT_ID, f"🚀 GOD ALERT: {coin}\nPrice: {data['close']}\nRSI: {data['RSI']:.2f}\nAction: BUY")
+                time.sleep(1) # Har coin ke liye delay
+            except:
+                continue
+
+# --- Bot Commands ---
+@bot.message_handler(commands=['status'])
 def status(message):
-    bot.reply_to(message, f"Bot is running! Full Secure Interactive Mode.\nTracking {len(coins)} coins.\nActive trades: 0")
+    bot.reply_to(message, f"God Bot is running!\nTracking {len(coins)} coins.\nStatus: RSI/EMA Strategy Active.")
 
 @bot.message_handler(commands=['price'])
 def get_price(message):
     try:
-        parts = message.text.split()
-        if len(parts) > 1:
-            coin = parts[1].upper()
-            ticker = exchange.fetch_ticker(coin)
-            bot.reply_to(message, f"{coin} Price: ${ticker['last']}")
-        else:
-            bot.reply_to(message, "Please specify a coin, e.g., /price BTC/USDT")
-    except Exception as e:
-        bot.reply_to(message, "Error: Invalid coin or check format.")
+        coin = message.text.split()[1].upper()
+        ticker = exchange.fetch_ticker(coin)
+        bot.reply_to(message, f"{coin} Price: ${ticker['last']}")
+    except:
+        bot.reply_to(message, "Error: Invalid coin or format.")
 
-# --- Main Logic ---
-def run_bot():
-    print("Bot Started - Full Secure Interactive Mode.")
-    # Yahan tumhara main trading loop aayega
-    while True:
-        try:
-            # Yahan tumhara logic chalta rahega
-            time.sleep(10)
-        except Exception as e:
-            print(f"Error in loop: {e}")
-            time.sleep(10)
+# --- Server & Main ---
+app = Flask(__name__)
+@app.route('/')
+def index(): return "God Bot Active"
 
 if __name__ == '__main__':
-    # Flask dummy server for Render
-    import threading
-    from flask import Flask
-    app = Flask(__name__)
-    @app.route('/')
-    def index(): return "Bot is Alive"
     threading.Thread(target=lambda: app.run(host='0.0.0.0', port=10000)).start()
-    
-    # Bot start
+    threading.Thread(target=check_market).start()
     bot.polling(none_stop=True)
     
