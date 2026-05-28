@@ -47,6 +47,36 @@ except Exception:
 time.sleep(2)
 
 # =====================================================
+# COMMAND HANDLERS
+# =====================================================
+
+@bot.message_handler(commands=['start', 'status'])
+def send_status(message):
+
+    try:
+
+        status_msg = (
+            "🤖 *BOT STATUS REPORT*\n\n"
+            "✅ *Market Scanner:* Active\n"
+            "📈 *Strategy:* RSI < 33 | ADX > 20\n"
+            "🐋 *Whale Detection:* Enabled\n"
+            "⏳ *Market Scan:* Running 24/7\n\n"
+            "🚨 Perfect signal milte hi alert yahan aayega."
+        )
+
+        bot.reply_to(
+            message,
+            status_msg,
+            parse_mode='Markdown'
+        )
+
+    except Exception as e:
+
+        logging.error(
+            f"Command Error: {e}"
+        )
+
+# =====================================================
 # STARTUP TEST MESSAGE
 # =====================================================
 
