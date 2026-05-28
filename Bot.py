@@ -1,82 +1,542 @@
-import telebot
+# =========================================================
+# ADVANCED KUCOIN AI SIGNAL BOT
+# HIGHER ACCURACY VERSION
+# Render + GitHub Ready
+# =========================================================
+
 import os
-import ccxt
 import time
+import telebot
+import ccxt
+import logging
+import requests
 import threading
+import pandas as pd
+
 from flask import Flask
 
-# --- Setup ---
-TOKEN = os.environ.get('TELEGRAM_TOKEN')
-CHAT_ID = os.environ.get('CHAT_ID')
-API_KEY = os.environ.get('BINANCE_API_KEY')
-API_SECRET = os.environ.get('BINANCE_SECRET_KEY')
+# =========================================================
+# CONFIG
+# =========================================================
 
-bot = telebot.TeleBot(TOKEN)
+TOKEN = os.environ.get("TELEGRAM_TOKEN")
+CHAT_ID = os.environ.get("CHAT_ID")
 
-# Binance Setup with Proxy
-exchange = ccxt.binance({
-    'apiKey': API_KEY,
-    'secret': API_SECRET,
+TIMEFRAME = '15m'
+HIGHER_TIMEFRAME = '1h'
+
+SCAN_DELAY = 5
+COOLDOWN = 10800
+
+RSI_LIMIT = 30
+ADX_LIMIT = 20
+
+# =========================================================
+# TELEGRAM
+# =========================================================
+
+bot = telebot.TeleBot(
+    TOKEN,
+    parse_mode='Markdown'
+)
+
+# =========================================================
+# KUCOIN
+# =========================================================
+
+exchange = ccxt.kucoin({
     'enableRateLimit': True,
-    'options': {'defaultType': 'spot'},
-    'proxies': {
-        'http': 'http://185.199.229.156:7497',
-        'https': 'http://185.199.229.156:7497',
+    'rateLimit': 1200,
+    'timeout': 30000,
+    'options': {
+        'adjustForTimeDifference': True
     }
 })
 
+# =========================================================
+# 40 BEST COINS
+# =========================================================
+
 coins = [
-    'BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'XRP/USDT', 'ADA/USDT', 'DOT/USDT', 'MATIC/USDT', 'LINK/USDT', 'UNI/USDT', 'AVAX/USDT',
-    'LTC/USDT', 'BNB/USDT', 'XLM/USDT', 'DOGE/USDT', 'SHIB/USDT', 'TRX/USDT', 'ATOM/USDT', 'NEAR/USDT', 'FIL/USDT', 'ALGO/USDT',
-    'VET/USDT', 'ICP/USDT', 'HBAR/USDT', 'FTM/USDT', 'SAND/USDT', 'MANA/USDT', 'AXS/USDT', 'EGLD/USDT', 'EOS/USDT', 'XTZ/USDT',
-    'AAVE/USDT', 'CRV/USDT', 'MKR/USDT', 'COMP/USDT', 'SNX/USDT', 'SUSHI/USDT', 'YFI/USDT', 'GRT/USDT', 'BAT/USDT', 'CHZ/USDT',
-    'ENJ/USDT', 'GALA/USDT', 'RUNE/USDT', 'KAVA/USDT', 'ZIL/USDT', 'THETA/USDT', 'ONT/USDT', 'QTUM/USDT', 'OMG/USDT', 'IOST/USDT',
-    'BAND/USDT', 'WAVES/USDT', 'REN/USDT', 'SKL/USDT', 'OCEAN/USDT', 'ANKR/USDT', 'LRC/USDT', 'BAL/USDT', 'KNC/USDT', 'DASH/USDT',
-    'ZEC/USDT', 'ETC/USDT', 'NEO/USDT', 'XMR/USDT', 'BCH/USDT', 'BSV/USDT', 'IOTA/USDT', 'ICX/USDT', 'SC/USDT', 'RVN/USDT',
-    'HNT/USDT', 'CELO/USDT', 'ONE/USDT', 'IOTX/USDT', 'CTSI/USDT', 'LSK/USDT', 'BTS/USDT', 'ARDR/USDT', 'ZEN/USDT', 'STX/USDT'
+    'BTC/USDT','ETH/USDT','SOL/USDT','XRP/USDT',
+    'ADA/USDT','DOGE/USDT','AVAX/USDT','LINK/USDT',
+    'DOT/USDT','MATIC/USDT','ATOM/USDT','NEAR/USDT',
+    'FIL/USDT','LTC/USDT','TRX/USDT','ETC/USDT',
+    'ICP/USDT','HBAR/USDT','FTM/USDT','SAND/USDT',
+
+    'AAVE/USDT','CRV/USDT','MKR/USDT','SNX/USDT',
+    'SUSHI/USDT','GRT/USDT','CHZ/USDT','GALA/USDT',
+    'RUNE/USDT','THETA/USDT','LRC/USDT','DASH/USDT',
+
+    'ZEC/USDT','NEO/USDT','XMR/USDT','IOTA/USDT',
+    'ICX/USDT','HNT/USDT','IOTX/USDT','STX/USDT'
 ]
 
-def get_rsi(prices, period=14):
-    if len(prices) < period + 1: return 50
-    deltas = [prices[i+1] - prices[i] for i in range(len(prices)-1)]
-    gains = [d if d > 0 else 0 for d in deltas]
-    losses = [-d if d < 0 else 0 for d in deltas]
-    avg_gain = sum(gains[-period:]) / period
-    avg_loss = sum(losses[-period:]) / period
-    if avg_loss == 0: return 100
+# =========================================================
+# MEMORY
+# =========================================================
+
+last_alerts = {}
+
+# =========================================================
+# LOGGING
+# =========================================================
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("bot.log"),
+        logging.StreamHandler()
+    ]
+)
+
+# =========================================================
+# FEAR & GREED
+# =========================================================
+
+def get_market_sentiment():
+
+    try:
+
+        response = requests.get(
+            "https://api.alternative.me/fng/",
+            timeout=10
+        )
+
+        return int(
+            response.json()['data'][0]['value']
+        )
+
+    except:
+
+        return 50
+
+# =========================================================
+# RSI
+# =========================================================
+
+def calculate_rsi(prices, period=14):
+
+    delta = pd.Series(prices).diff()
+
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+
+    avg_gain = gain.ewm(
+        alpha=1/period,
+        adjust=False
+    ).mean()
+
+    avg_loss = loss.ewm(
+        alpha=1/period,
+        adjust=False
+    ).mean()
+
     rs = avg_gain / avg_loss
-    return 100 - (100 / (1 + rs))
 
-def check_market():
+    rsi = 100 - (100 / (1 + rs))
+
+    return float(rsi.iloc[-1])
+
+# =========================================================
+# EMA
+# =========================================================
+
+def calculate_ema(prices, period):
+
+    ema = pd.Series(prices).ewm(
+        span=period,
+        adjust=False
+    ).mean()
+
+    return float(ema.iloc[-1])
+
+# =========================================================
+# ATR
+# =========================================================
+
+def calculate_atr(ohlcv, period=14):
+
+    df = pd.DataFrame(
+        ohlcv,
+        columns=['t','o','h','l','c','v']
+    )
+
+    tr = pd.concat([
+        df['h'] - df['l'],
+        abs(df['h'] - df['c'].shift()),
+        abs(df['l'] - df['c'].shift())
+    ], axis=1).max(axis=1)
+
+    atr = tr.rolling(period).mean()
+
+    return float(atr.iloc[-1])
+
+# =========================================================
+# ADX
+# =========================================================
+
+def calculate_adx(ohlcv, period=14):
+
+    df = pd.DataFrame(
+        ohlcv,
+        columns=['t','o','h','l','c','v']
+    )
+
+    plus_dm = df['h'].diff()
+    minus_dm = df['l'].diff() * -1
+
+    plus_dm[plus_dm < 0] = 0
+    minus_dm[minus_dm < 0] = 0
+
+    tr = pd.concat([
+        df['h'] - df['l'],
+        abs(df['h'] - df['c'].shift()),
+        abs(df['l'] - df['c'].shift())
+    ], axis=1).max(axis=1)
+
+    atr = tr.rolling(period).mean()
+
+    plus_di = (
+        100 *
+        (plus_dm.rolling(period).mean() / atr)
+    )
+
+    minus_di = (
+        100 *
+        (minus_dm.rolling(period).mean() / atr)
+    )
+
+    dx = (
+        abs(plus_di - minus_di) /
+        abs(plus_di + minus_di)
+    ) * 100
+
+    adx = dx.rolling(period).mean()
+
+    return float(adx.iloc[-1])
+
+# =========================================================
+# FAKE PUMP FILTER
+# =========================================================
+
+def fake_pump_detected(ohlcv):
+
+    candle = ohlcv[-1]
+
+    high = candle[2]
+    low = candle[3]
+
+    open_price = candle[1]
+    close = candle[4]
+
+    total = high - low
+
+    if total == 0:
+        return True
+
+    body = abs(close - open_price)
+
+    ratio = body / total
+
+    return ratio < 0.25
+
+# =========================================================
+# SIGNAL MESSAGE
+# =========================================================
+
+def send_signal(
+    symbol,
+    price,
+    rsi,
+    atr,
+    adx,
+    sentiment,
+    whale
+):
+
+    sl = price - (atr * 1.5)
+
+    tp1 = price + (atr * 2)
+    tp2 = price + (atr * 4)
+    tp3 = price + (atr * 6)
+
+    rr = round(
+        (tp2 - price) /
+        (price - sl),
+        2
+    )
+
+    whale_text = (
+        "🐋 Whale Volume Detected\n"
+        if whale else ""
+    )
+
+    message = f"""
+🚨 *ADVANCED AI SIGNAL*
+
+🪙 *Coin:* `{symbol}`
+
+💰 *Entry:* `{price:.5f}`
+
+📉 *RSI:* `{rsi:.2f}`
+📈 *ADX:* `{adx:.2f}`
+😨 *Fear & Greed:* `{sentiment}`
+
+{whale_text}
+
+🎯 *TP1:* `{tp1:.5f}`
+🎯 *TP2:* `{tp2:.5f}`
+🎯 *TP3:* `{tp3:.5f}`
+
+🛑 *SL:* `{sl:.5f}`
+
+⚖️ *RR:* `{rr}`
+
+⚠️ Move SL to Entry after TP1.
+"""
+
+    bot.send_message(
+        CHAT_ID,
+        message
+    )
+
+# =========================================================
+# MAIN ENGINE
+# =========================================================
+
+def analyze_market():
+
     while True:
-        for coin in coins:
-            try:
-                ohlcv = exchange.fetch_ohlcv(coin, '15m', limit=20)
-                closes = [bar[4] for bar in ohlcv]
-                volumes = [bar[5] for bar in ohlcv]
-                
-                rsi = get_rsi(closes)
-                avg_volume = sum(volumes[:-1]) / len(volumes[:-1]) if len(volumes) > 1 else 1
-                current_volume = volumes[-1]
 
-                # Whale + RSI Logic
-                if rsi < 35 and current_volume > (avg_volume * 3):
-                    bot.send_message(CHAT_ID, f"🐋 WHALE & GOD ALERT: {coin}\nRSI: {rsi:.2f}\nPrice: {closes[-1]}\nVolume Spike: {current_volume/avg_volume:.1f}x")
-                
-                time.sleep(2)
-            except Exception:
+        try:
+
+            logging.info("Scanning Market")
+
+            # =====================================
+            # FEAR & GREED FILTER
+            # =====================================
+
+            sentiment = get_market_sentiment()
+
+            if sentiment >= 80:
+
+                logging.warning(
+                    "Extreme Greed"
+                )
+
+                time.sleep(300)
+
                 continue
 
-@bot.message_handler(commands=['status'])
-def status(message):
-    bot.reply_to(message, "Bot is fully operational (Whale + RSI active).")
+            # =====================================
+            # BTC SAFETY
+            # =====================================
+
+            btc = exchange.fetch_ohlcv(
+                'BTC/USDT',
+                TIMEFRAME,
+                limit=3
+            )
+
+            btc_change = (
+                btc[-1][4] - btc[-2][4]
+            ) / btc[-2][4]
+
+            if btc_change < -0.025:
+
+                logging.warning(
+                    "BTC Dump Protection"
+                )
+
+                time.sleep(180)
+
+                continue
+
+            # =====================================
+            # COIN LOOP
+            # =====================================
+
+            for symbol in coins:
+
+                try:
+
+                    if (
+                        time.time() -
+                        last_alerts.get(symbol, 0)
+                    ) < COOLDOWN:
+
+                        continue
+
+                    # =============================
+                    # MAIN TF
+                    # =============================
+
+                    ohlcv = exchange.fetch_ohlcv(
+                        symbol,
+                        TIMEFRAME,
+                        limit=150
+                    )
+
+                    # =============================
+                    # HIGHER TF
+                    # =============================
+
+                    htf = exchange.fetch_ohlcv(
+                        symbol,
+                        HIGHER_TIMEFRAME,
+                        limit=150
+                    )
+
+                    closes = [x[4] for x in ohlcv]
+                    volumes = [x[5] for x in ohlcv]
+
+                    htf_closes = [x[4] for x in htf]
+
+                    price = closes[-1]
+
+                    # =============================
+                    # INDICATORS
+                    # =============================
+
+                    rsi = calculate_rsi(closes)
+
+                    atr = calculate_atr(ohlcv)
+
+                    adx = calculate_adx(ohlcv)
+
+                    ema50 = calculate_ema(
+                        closes,
+                        50
+                    )
+
+                    ema200 = calculate_ema(
+                        closes,
+                        200
+                    )
+
+                    htf_ema50 = calculate_ema(
+                        htf_closes,
+                        50
+                    )
+
+                    htf_ema200 = calculate_ema(
+                        htf_closes,
+                        200
+                    )
+
+                    # =============================
+                    # TREND FILTER
+                    # =============================
+
+                    trend_ok = (
+                        ema50 > ema200 and
+                        htf_ema50 > htf_ema200 and
+                        price > ema50
+                    )
+
+                    # =============================
+                    # VOLUME FILTERS
+                    # =============================
+
+                    avg_volume = (
+                        sum(volumes[-15:-1]) / 14
+                    )
+
+                    volume_spike = (
+                        volumes[-1] >
+                        avg_volume * 2.5
+                    )
+
+                    whale = (
+                        volumes[-1] >
+                        avg_volume * 4
+                    )
+
+                    # =============================
+                    # FAKE PUMP FILTER
+                    # =============================
+
+                    fake_pump = fake_pump_detected(
+                        ohlcv
+                    )
+
+                    # =============================
+                    # FINAL SIGNAL
+                    # =============================
+
+                    signal = (
+                        rsi < RSI_LIMIT and
+                        adx > ADX_LIMIT and
+                        volume_spike and
+                        trend_ok and
+                        atr > 0 and
+                        not fake_pump
+                    )
+
+                    if signal:
+
+                        send_signal(
+                            symbol,
+                            price,
+                            rsi,
+                            atr,
+                            adx,
+                            sentiment,
+                            whale
+                        )
+
+                        last_alerts[symbol] = (
+                            time.time()
+                        )
+
+                    time.sleep(SCAN_DELAY)
+
+                except Exception as e:
+
+                    logging.error(
+                        f"{symbol} Error: {e}"
+                    )
+
+                    time.sleep(5)
+
+        except Exception as e:
+
+            logging.error(f"Main Error: {e}")
+
+            time.sleep(20)
+
+# =========================================================
+# FLASK
+# =========================================================
 
 app = Flask(__name__)
+
 @app.route('/')
-def index(): return "Bot Online"
+def home():
+
+    return "ADVANCED KUCOIN AI BOT ACTIVE"
+
+# =========================================================
+# START
+# =========================================================
 
 if __name__ == '__main__':
-    threading.Thread(target=lambda: app.run(host='0.0.0.0', port=10000)).start()
-    threading.Thread(target=check_market).start()
-    bot.polling(none_stop=True)
-    
+
+    logging.info("Starting Bot")
+
+    threading.Thread(
+        target=lambda: app.run(
+            host='0.0.0.0',
+            port=10000
+        ),
+        daemon=True
+    ).start()
+
+    threading.Thread(
+        target=analyze_market,
+        daemon=True
+    ).start()
+
+    bot.infinity_polling()
