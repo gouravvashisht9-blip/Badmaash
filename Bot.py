@@ -5,9 +5,11 @@ import ccxt
 import logging
 import requests
 import threading
+import traceback
 import pandas as pd
 
 from flask import Flask
+from telebot.apihelper import ApiTelegramException
 
 # =====================================================
 # CONFIG
@@ -34,9 +36,12 @@ bot = telebot.TeleBot(
     parse_mode='Markdown'
 )
 
+# REMOVE OLD WEBHOOK
 try:
     bot.remove_webhook()
-except:
+except ApiTelegramException:
+    pass
+except Exception:
     pass
 
 time.sleep(2)
@@ -89,7 +94,7 @@ logging.basicConfig(
 )
 
 # =====================================================
-# INDICATORS
+# MARKET SENTIMENT
 # =====================================================
 
 def get_market_sentiment():
@@ -105,9 +110,13 @@ def get_market_sentiment():
             response.json()['data'][0]['value']
         )
 
-    except:
+    except Exception:
 
         return 50
+
+# =====================================================
+# RSI
+# =====================================================
 
 def calculate_rsi(prices, period=14):
 
@@ -130,7 +139,16 @@ def calculate_rsi(prices, period=14):
 
     rsi = 100 - (100 / (1 + rs))
 
-    return float(rsi.iloc[-1])
+    value = float(rsi.iloc[-1])
+
+    if pd.isna(value):
+        return 50
+
+    return value
+
+# =====================================================
+# EMA
+# =====================================================
 
 def calculate_ema(prices, period):
 
@@ -140,6 +158,10 @@ def calculate_ema(prices, period):
     ).mean()
 
     return float(ema.iloc[-1])
+
+# =====================================================
+# ATR
+# =====================================================
 
 def calculate_atr(ohlcv, period=14):
 
@@ -156,7 +178,16 @@ def calculate_atr(ohlcv, period=14):
 
     atr = tr.rolling(period).mean()
 
-    return float(atr.iloc[-1])
+    value = float(atr.iloc[-1])
+
+    if pd.isna(value):
+        return 0
+
+    return value
+
+# =====================================================
+# ADX
+# =====================================================
 
 def calculate_adx(ohlcv, period=14):
 
@@ -196,10 +227,15 @@ def calculate_adx(ohlcv, period=14):
 
     adx = dx.rolling(period).mean()
 
-    return float(adx.iloc[-1])
+    value = float(adx.iloc[-1])
+
+    if pd.isna(value):
+        return 0
+
+    return value
 
 # =====================================================
-# SIGNAL
+# SIGNAL MESSAGE
 # =====================================================
 
 def send_signal(
@@ -217,6 +253,12 @@ def send_signal(
     tp1 = price + (atr * 2)
     tp2 = price + (atr * 4)
     tp3 = price + (atr * 6)
+
+    rr = round(
+        (tp2 - price) /
+        (price - sl),
+        2
+    )
 
     whale_text = (
         "\n🐋 Whale Volume Detected"
@@ -242,6 +284,8 @@ def send_signal(
 🎯 TP3: `{tp3:.5f}`
 
 🛑 SL: `{sl:.5f}`
+
+⚖️ RR: `{rr}`
 """
 
     bot.send_message(
@@ -250,7 +294,7 @@ def send_signal(
     )
 
 # =====================================================
-# ENGINE
+# MAIN ENGINE
 # =====================================================
 
 def analyze_market():
@@ -263,11 +307,18 @@ def analyze_market():
 
             sentiment = get_market_sentiment()
 
+            # EXTREME GREED FILTER
             if sentiment >= 80:
 
+                logging.warning(
+                    "Extreme Greed Market"
+                )
+
                 time.sleep(300)
+
                 continue
 
+            # BTC PROTECTION
             btc = exchange.fetch_ohlcv(
                 'BTC/USDT',
                 TIMEFRAME,
@@ -280,13 +331,20 @@ def analyze_market():
 
             if btc_change < -0.025:
 
+                logging.warning(
+                    "BTC Dump Protection"
+                )
+
                 time.sleep(180)
+
                 continue
 
+            # COIN LOOP
             for symbol in coins:
 
                 try:
 
+                    # COOLDOWN
                     if (
                         time.time() -
                         last_alerts.get(symbol, 0)
@@ -294,17 +352,22 @@ def analyze_market():
 
                         continue
 
+                    # MAIN TF
                     ohlcv = exchange.fetch_ohlcv(
                         symbol,
                         TIMEFRAME,
                         limit=150
                     )
 
+                    # HIGHER TF
                     htf = exchange.fetch_ohlcv(
                         symbol,
                         HIGHER_TIMEFRAME,
                         limit=150
                     )
+
+                    if not ohlcv or not htf:
+                        continue
 
                     closes = [x[4] for x in ohlcv]
                     volumes = [x[5] for x in ohlcv]
@@ -313,6 +376,7 @@ def analyze_market():
 
                     price = closes[-1]
 
+                    # INDICATORS
                     rsi = calculate_rsi(closes)
 
                     atr = calculate_atr(ohlcv)
@@ -339,12 +403,14 @@ def analyze_market():
                         200
                     )
 
+                    # TREND FILTER
                     trend_ok = (
                         ema50 > ema200 and
                         htf_ema50 > htf_ema200 and
                         price > ema50
                     )
 
+                    # VOLUME FILTER
                     avg_volume = (
                         sum(volumes[-15:-1]) / 14
                     )
@@ -359,6 +425,7 @@ def analyze_market():
                         avg_volume * 4
                     )
 
+                    # FINAL SIGNAL
                     signal = (
                         rsi < RSI_LIMIT and
                         adx > ADX_LIMIT and
@@ -385,17 +452,19 @@ def analyze_market():
 
                     time.sleep(SCAN_DELAY)
 
-                except Exception as e:
+                except Exception:
 
                     logging.error(
-                        f"{symbol}: {e}"
+                        traceback.format_exc()
                     )
 
                     time.sleep(3)
 
-        except Exception as e:
+        except Exception:
 
-            logging.error(e)
+            logging.error(
+                traceback.format_exc()
+            )
 
             time.sleep(20)
 
@@ -429,7 +498,25 @@ if __name__ == '__main__':
         daemon=True
     ).start()
 
-    bot.infinity_polling(
-        timeout=60,
-        long_polling_timeout=60
-)
+    # ANTI 409 LOOP
+    while True:
+
+        try:
+
+            bot.remove_webhook()
+
+            time.sleep(2)
+
+            bot.infinity_polling(
+                timeout=60,
+                long_polling_timeout=60,
+                skip_pending=True
+            )
+
+        except Exception:
+
+            logging.error(
+                traceback.format_exc()
+            )
+
+            time.sleep(15)
