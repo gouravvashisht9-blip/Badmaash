@@ -613,7 +613,5 @@ if __name__ == '__main__':
         daemon=True
     ).start()
 
-    bot.infinity_polling(
-        timeout=60,
-        long_polling_timeout=60
-    )
+    bot.infinity_polling(none_stop=True, skip_pending=True)
+    
