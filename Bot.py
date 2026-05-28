@@ -1,6 +1,6 @@
 # =========================================================
 # ADVANCED KUCOIN AI SIGNAL BOT
-# HIGHER ACCURACY VERSION
+# FINAL STABLE VERSION
 # Render + GitHub Ready
 # =========================================================
 
@@ -40,6 +40,10 @@ bot = telebot.TeleBot(
     parse_mode='Markdown'
 )
 
+# REMOVE OLD WEBHOOK
+bot.remove_webhook()
+time.sleep(1)
+
 # =========================================================
 # KUCOIN
 # =========================================================
@@ -53,19 +57,21 @@ exchange = ccxt.kucoin({
     }
 })
 
+exchange.load_markets()
+
 # =========================================================
-# 40 BEST COINS
+# BEST COINS
 # =========================================================
 
 coins = [
     'BTC/USDT','ETH/USDT','SOL/USDT','XRP/USDT',
     'ADA/USDT','DOGE/USDT','AVAX/USDT','LINK/USDT',
-    'DOT/USDT','MATIC/USDT','ATOM/USDT','NEAR/USDT',
+    'DOT/USDT','POL/USDT','ATOM/USDT','NEAR/USDT',
     'FIL/USDT','LTC/USDT','TRX/USDT','ETC/USDT',
-    'ICP/USDT','HBAR/USDT','FTM/USDT','SAND/USDT',
+    'ICP/USDT','HBAR/USDT','S/USDT','SAND/USDT',
 
-    'AAVE/USDT','CRV/USDT','MKR/USDT','SNX/USDT',
-    'SUSHI/USDT','GRT/USDT','CHZ/USDT','GALA/USDT',
+    'AAVE/USDT','CRV/USDT','SNX/USDT',
+    'SUSHI/USDT','GRT/USDT','CHZ/USDT',
     'RUNE/USDT','THETA/USDT','LRC/USDT','DASH/USDT',
 
     'ZEC/USDT','NEO/USDT','XMR/USDT','IOTA/USDT',
@@ -108,7 +114,9 @@ def get_market_sentiment():
             response.json()['data'][0]['value']
         )
 
-    except:
+    except Exception as e:
+
+        logging.error(f"Sentiment Error: {e}")
 
         return 50
 
@@ -118,26 +126,39 @@ def get_market_sentiment():
 
 def calculate_rsi(prices, period=14):
 
-    delta = pd.Series(prices).diff()
+    try:
 
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
+        delta = pd.Series(prices).diff()
 
-    avg_gain = gain.ewm(
-        alpha=1/period,
-        adjust=False
-    ).mean()
+        gain = delta.clip(lower=0)
+        loss = -delta.clip(upper=0)
 
-    avg_loss = loss.ewm(
-        alpha=1/period,
-        adjust=False
-    ).mean()
+        avg_gain = gain.ewm(
+            alpha=1/period,
+            adjust=False
+        ).mean()
 
-    rs = avg_gain / avg_loss
+        avg_loss = loss.ewm(
+            alpha=1/period,
+            adjust=False
+        ).mean()
 
-    rsi = 100 - (100 / (1 + rs))
+        rs = avg_gain / avg_loss
 
-    return float(rsi.iloc[-1])
+        rsi = 100 - (100 / (1 + rs))
+
+        value = float(rsi.iloc[-1])
+
+        if pd.isna(value):
+            return 50
+
+        return value
+
+    except Exception as e:
+
+        logging.error(f"RSI Error: {e}")
+
+        return 50
 
 # =========================================================
 # EMA
@@ -145,12 +166,20 @@ def calculate_rsi(prices, period=14):
 
 def calculate_ema(prices, period):
 
-    ema = pd.Series(prices).ewm(
-        span=period,
-        adjust=False
-    ).mean()
+    try:
 
-    return float(ema.iloc[-1])
+        ema = pd.Series(prices).ewm(
+            span=period,
+            adjust=False
+        ).mean()
+
+        return float(ema.iloc[-1])
+
+    except Exception as e:
+
+        logging.error(f"EMA Error: {e}")
+
+        return prices[-1]
 
 # =========================================================
 # ATR
@@ -158,20 +187,33 @@ def calculate_ema(prices, period):
 
 def calculate_atr(ohlcv, period=14):
 
-    df = pd.DataFrame(
-        ohlcv,
-        columns=['t','o','h','l','c','v']
-    )
+    try:
 
-    tr = pd.concat([
-        df['h'] - df['l'],
-        abs(df['h'] - df['c'].shift()),
-        abs(df['l'] - df['c'].shift())
-    ], axis=1).max(axis=1)
+        df = pd.DataFrame(
+            ohlcv,
+            columns=['t','o','h','l','c','v']
+        )
 
-    atr = tr.rolling(period).mean()
+        tr = pd.concat([
+            df['h'] - df['l'],
+            abs(df['h'] - df['c'].shift()),
+            abs(df['l'] - df['c'].shift())
+        ], axis=1).max(axis=1)
 
-    return float(atr.iloc[-1])
+        atr = tr.rolling(period).mean()
+
+        value = float(atr.iloc[-1])
+
+        if pd.isna(value):
+            return 0
+
+        return value
+
+    except Exception as e:
+
+        logging.error(f"ATR Error: {e}")
+
+        return 0
 
 # =========================================================
 # ADX
@@ -179,43 +221,56 @@ def calculate_atr(ohlcv, period=14):
 
 def calculate_adx(ohlcv, period=14):
 
-    df = pd.DataFrame(
-        ohlcv,
-        columns=['t','o','h','l','c','v']
-    )
+    try:
 
-    plus_dm = df['h'].diff()
-    minus_dm = df['l'].diff() * -1
+        df = pd.DataFrame(
+            ohlcv,
+            columns=['t','o','h','l','c','v']
+        )
 
-    plus_dm[plus_dm < 0] = 0
-    minus_dm[minus_dm < 0] = 0
+        plus_dm = df['h'].diff()
+        minus_dm = df['l'].diff() * -1
 
-    tr = pd.concat([
-        df['h'] - df['l'],
-        abs(df['h'] - df['c'].shift()),
-        abs(df['l'] - df['c'].shift())
-    ], axis=1).max(axis=1)
+        plus_dm[plus_dm < 0] = 0
+        minus_dm[minus_dm < 0] = 0
 
-    atr = tr.rolling(period).mean()
+        tr = pd.concat([
+            df['h'] - df['l'],
+            abs(df['h'] - df['c'].shift()),
+            abs(df['l'] - df['c'].shift())
+        ], axis=1).max(axis=1)
 
-    plus_di = (
-        100 *
-        (plus_dm.rolling(period).mean() / atr)
-    )
+        atr = tr.rolling(period).mean()
 
-    minus_di = (
-        100 *
-        (minus_dm.rolling(period).mean() / atr)
-    )
+        plus_di = (
+            100 *
+            (plus_dm.rolling(period).mean() / atr)
+        )
 
-    dx = (
-        abs(plus_di - minus_di) /
-        abs(plus_di + minus_di)
-    ) * 100
+        minus_di = (
+            100 *
+            (minus_dm.rolling(period).mean() / atr)
+        )
 
-    adx = dx.rolling(period).mean()
+        dx = (
+            abs(plus_di - minus_di) /
+            abs(plus_di + minus_di)
+        ) * 100
 
-    return float(adx.iloc[-1])
+        adx = dx.rolling(period).mean()
+
+        value = float(adx.iloc[-1])
+
+        if pd.isna(value):
+            return 0
+
+        return value
+
+    except Exception as e:
+
+        logging.error(f"ADX Error: {e}")
+
+        return 0
 
 # =========================================================
 # FAKE PUMP FILTER
@@ -223,24 +278,32 @@ def calculate_adx(ohlcv, period=14):
 
 def fake_pump_detected(ohlcv):
 
-    candle = ohlcv[-1]
+    try:
 
-    high = candle[2]
-    low = candle[3]
+        candle = ohlcv[-1]
 
-    open_price = candle[1]
-    close = candle[4]
+        high = candle[2]
+        low = candle[3]
 
-    total = high - low
+        open_price = candle[1]
+        close = candle[4]
 
-    if total == 0:
-        return True
+        total = high - low
 
-    body = abs(close - open_price)
+        if total == 0:
+            return True
 
-    ratio = body / total
+        body = abs(close - open_price)
 
-    return ratio < 0.25
+        ratio = body / total
+
+        return ratio < 0.25
+
+    except Exception as e:
+
+        logging.error(f"Fake Pump Error: {e}")
+
+        return False
 
 # =========================================================
 # SIGNAL MESSAGE
@@ -297,10 +360,18 @@ def send_signal(
 ⚠️ Move SL to Entry after TP1.
 """
 
-    bot.send_message(
-        CHAT_ID,
-        message
-    )
+    try:
+
+        bot.send_message(
+            CHAT_ID,
+            message
+        )
+
+        logging.info(f"Signal Sent: {symbol}")
+
+    except Exception as e:
+
+        logging.error(f"Telegram Error: {e}")
 
 # =========================================================
 # MAIN ENGINE
@@ -370,7 +441,7 @@ def analyze_market():
                         continue
 
                     # =============================
-                    # MAIN TF
+                    # MAIN TF DATA
                     # =============================
 
                     ohlcv = exchange.fetch_ohlcv(
@@ -380,7 +451,7 @@ def analyze_market():
                     )
 
                     # =============================
-                    # HIGHER TF
+                    # HIGHER TF DATA
                     # =============================
 
                     htf = exchange.fetch_ohlcv(
@@ -388,6 +459,9 @@ def analyze_market():
                         HIGHER_TIMEFRAME,
                         limit=150
                     )
+
+                    if not ohlcv or not htf:
+                        continue
 
                     closes = [x[4] for x in ohlcv]
                     volumes = [x[5] for x in ohlcv]
@@ -539,4 +613,7 @@ if __name__ == '__main__':
         daemon=True
     ).start()
 
-    bot.infinity_polling()
+    bot.infinity_polling(
+        timeout=60,
+        long_polling_timeout=60
+    )
