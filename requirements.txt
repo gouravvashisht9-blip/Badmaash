@@ -1,4 +1,5 @@
 ccxt
-requests
 pyTelegramBotAPI
 flask
+pandas
+pandas-ta
