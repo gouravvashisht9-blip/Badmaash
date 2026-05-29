@@ -20,7 +20,7 @@ CHAT_ID = os.environ.get("CHAT_ID")
 TIMEFRAME = '15m'
 HIGHER_TIMEFRAME = '1h'
 
-SCAN_DELAY = 5
+SCAN_DELAY = 15
 COOLDOWN = 10800
 
 RSI_LIMIT = 33
@@ -40,11 +40,9 @@ bot = telebot.TeleBot(
 # =====================================================
 
 try:
-
     bot.remove_webhook()
 
 except Exception:
-
     pass
 
 time.sleep(2)
@@ -66,7 +64,6 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-
     return "BOT ACTIVE"
 
 def run_flask():
@@ -94,10 +91,11 @@ def status_command(message):
 
     status_msg = (
         "🤖 *BOT STATUS REPORT*\n\n"
-        "✅ *Scanner:* Active\n"
-        "📈 *Strategy:* RSI < 33 | ADX > 20\n"
-        "🐋 *Whale Detection:* Enabled\n"
-        "⏳ *Scanning:* Live Market 24/7\n\n"
+        "✅ Scanner Active\n"
+        "📈 RSI < 33\n"
+        "📊 ADX > 20\n"
+        "🐋 Whale Detection Enabled\n"
+        "⚡ High Accuracy Mode ON\n\n"
         "🚨 Signal milte hi alert aayega."
     )
 
@@ -115,23 +113,21 @@ try:
 
     bot.send_message(
         CHAT_ID,
-        "✅ BOT STARTED SUCCESSFULLY\n📡 Market Scanner Online"
+        "✅ BOT STARTED SUCCESSFULLY\n📡 Scanner Online"
     )
-
-    print("TELEGRAM CONNECTED")
 
 except Exception as e:
 
-    print(f"TELEGRAM ERROR: {e}")
+    print(e)
 
 # =====================================================
-# KUCOIN EXCHANGE
+# KUCOIN
 # =====================================================
 
 exchange = ccxt.kucoin({
     'enableRateLimit': True,
-    'rateLimit': 1200,
-    'timeout': 30000,
+    'rateLimit': 2000,
+    'timeout': 60000,
     'options': {
         'adjustForTimeDifference': True
     }
@@ -150,7 +146,7 @@ coins = [
     'HBAR/USDT','SAND/USDT','AAVE/USDT','CRV/USDT',
 
     'SNX/USDT','SUSHI/USDT','GRT/USDT','CHZ/USDT',
-    'RUNE/USDT','THETA/USDT','LRC/USDT',
+    'RUNE/USDT','THETA/USDT','LRC/USDT','DASH/USDT',
     'ZEC/USDT','NEO/USDT','XMR/USDT','IOTA/USDT',
     'ICX/USDT','HNT/USDT','IOTX/USDT','STX/USDT',
 
@@ -159,7 +155,8 @@ coins = [
     'WIF/USDT','FLOKI/USDT','JUP/USDT',
 
     'PYTH/USDT','STRK/USDT','BLUR/USDT','DYDX/USDT',
-    'GMX/USDT','SUI/USDT','CFX/USDT','MASK/USDT','MAGIC/USDT','ACH/USDT','API3/USDT'
+    'GMX/USDT','SUI/USDT','CFX/USDT','MASK/USDT',
+    'MAGIC/USDT','ACH/USDT','API3/USDT'
 ]
 
 # =====================================================
@@ -217,7 +214,6 @@ def calculate_rsi(prices, period=14):
     value = float(rsi.iloc[-1])
 
     if pd.isna(value):
-
         return 50
 
     return value
@@ -259,7 +255,6 @@ def calculate_atr(ohlcv, period=14):
     value = float(atr.iloc[-1])
 
     if pd.isna(value):
-
         return 0
 
     return value
@@ -311,13 +306,12 @@ def calculate_adx(ohlcv, period=14):
     value = float(adx.iloc[-1])
 
     if pd.isna(value):
-
         return 0
 
     return value
 
 # =====================================================
-# SIGNAL FUNCTION
+# SEND SIGNAL
 # =====================================================
 
 def send_signal(
@@ -362,6 +356,8 @@ def send_signal(
 
 🛑 SL: `{sl:.5f}`
 
+⚡ High Accuracy Signal
+
 """
 
     bot.send_message(
@@ -398,7 +394,7 @@ def analyze_market():
             btc = exchange.fetch_ohlcv(
                 'BTC/USDT',
                 TIMEFRAME,
-                limit=3
+                limit=2
             )
 
             btc_change = (
@@ -442,7 +438,6 @@ def analyze_market():
                     )
 
                     if not ohlcv or not htf:
-
                         continue
 
                     closes = [x[4] for x in ohlcv]
@@ -470,7 +465,7 @@ def analyze_market():
 
                         ema50 > ema200 and
                         htf_ema50 > htf_ema200 and
-                        price > ema50
+                        price > ema200
 
                     )
 
@@ -516,13 +511,35 @@ def analyze_market():
 
                     time.sleep(SCAN_DELAY)
 
-                except Exception:
+                except Exception as e:
 
-                    logging.error(
-                        traceback.format_exc()
-                    )
+                    error_text = str(e)
 
-                    time.sleep(3)
+                    # RATE LIMIT FIX
+                    if "429" in error_text:
+
+                        logging.warning(
+                            "KUCOIN RATE LIMIT HIT - COOLING DOWN"
+                        )
+
+                        time.sleep(90)
+
+                    # NETWORK ERROR
+                    elif "NetworkError" in error_text:
+
+                        logging.warning(
+                            "NETWORK ISSUE - RETRYING"
+                        )
+
+                        time.sleep(30)
+
+                    else:
+
+                        logging.error(
+                            traceback.format_exc()
+                        )
+
+                        time.sleep(5)
 
         except Exception:
 
@@ -550,8 +567,8 @@ if __name__ == "__main__":
 
     print("BOT STARTED")
 
-    bot.polling(
-        none_stop=True,
-        interval=1,
-        timeout=20
-        )
+    bot.infinity_polling(
+        timeout=30,
+        long_polling_timeout=30,
+        skip_pending=True
+    )
