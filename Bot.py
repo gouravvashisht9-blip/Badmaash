@@ -20,9 +20,10 @@ CHAT_ID = os.environ.get("CHAT_ID")
 TIMEFRAME = '15m'
 HIGHER_TIMEFRAME = '1h'
 
-SCAN_DELAY = 15
+SCAN_DELAY = 25
 COOLDOWN = 10800
 
+# ===== BEST BALANCED SETTINGS =====
 RSI_LIMIT = 33
 ADX_LIMIT = 20
 
@@ -41,7 +42,6 @@ bot = telebot.TeleBot(
 
 try:
     bot.remove_webhook()
-
 except Exception:
     pass
 
@@ -74,7 +74,7 @@ def run_flask():
     )
 
 # =====================================================
-# COMMANDS
+# TELEGRAM COMMANDS
 # =====================================================
 
 @bot.message_handler(commands=['start'])
@@ -121,12 +121,12 @@ except Exception as e:
     print(e)
 
 # =====================================================
-# KUCOIN
+# KUCOIN EXCHANGE
 # =====================================================
 
 exchange = ccxt.kucoin({
     'enableRateLimit': True,
-    'rateLimit': 2000,
+    'rateLimit': 3500,
     'timeout': 60000,
     'options': {
         'adjustForTimeDifference': True
@@ -390,26 +390,36 @@ def analyze_market():
 
                 continue
 
-            # BTC SAFETY FILTER
-            btc = exchange.fetch_ohlcv(
-                'BTC/USDT',
-                TIMEFRAME,
-                limit=2
-            )
+            # BTC SAFETY CHECK
+            try:
 
-            btc_change = (
-                btc[-1][4] - btc[-2][4]
-            ) / btc[-2][4]
-
-            if btc_change < -0.025:
-
-                logging.warning(
-                    "BTC Dump Protection Active"
+                btc = exchange.fetch_ohlcv(
+                    'BTC/USDT',
+                    TIMEFRAME,
+                    limit=3
                 )
 
-                time.sleep(180)
+                if btc and len(btc) >= 2:
 
-                continue
+                    btc_change = (
+                        btc[-1][4] - btc[-2][4]
+                    ) / btc[-2][4]
+
+                    if btc_change < -0.025:
+
+                        logging.warning(
+                            "BTC Dump Protection Active"
+                        )
+
+                        time.sleep(180)
+
+                        continue
+
+            except Exception as btc_error:
+
+                logging.warning(
+                    f"BTC CHECK FAILED: {btc_error}"
+                )
 
             # COINS LOOP
             for symbol in coins:
@@ -476,7 +486,7 @@ def analyze_market():
 
                     volume_spike = (
                         volumes[-1] >
-                        avg_volume * 2.5
+                        avg_volume * 2.2
                     )
 
                     whale = (
@@ -522,7 +532,7 @@ def analyze_market():
                             "KUCOIN RATE LIMIT HIT - COOLING DOWN"
                         )
 
-                        time.sleep(90)
+                        time.sleep(180)
 
                     # NETWORK ERROR
                     elif "NetworkError" in error_text:
