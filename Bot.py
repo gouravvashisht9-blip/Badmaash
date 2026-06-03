@@ -1,373 +1,380 @@
 import os
-import time
-import telebot
-import threading
-import logging
-import traceback
-import requests
 import ccxt
+import time
+import logging
+import telebot
 import pandas as pd
+import ta
+from threading import Thread
 
-from flask import Flask
-
-# =====================================================
-# CONFIG
-# =====================================================
+# =========================================
+# TELEGRAM
+# =========================================
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 
-TIMEFRAME = '15m'
-HIGHER_TIMEFRAME = '1h'
+bot = telebot.TeleBot(TOKEN)
 
-SCAN_DELAY = 25
-COOLDOWN = 10800
-
-# ===== BEST BALANCED SETTINGS =====
-RSI_LIMIT = 33
-ADX_LIMIT = 20
-
-# =====================================================
-# TELEGRAM BOT
-# =====================================================
-
-bot = telebot.TeleBot(
-    TOKEN,
-    parse_mode="Markdown"
-)
-
-# =====================================================
-# REMOVE WEBHOOK
-# =====================================================
-
-try:
-    bot.remove_webhook()
-except Exception:
-    pass
-
-time.sleep(2)
-
-# =====================================================
+# =========================================
 # LOGGING
-# =====================================================
+# =========================================
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
+    format='%(asctime)s %(levelname)s %(message)s'
 )
 
-# =====================================================
-# FLASK
-# =====================================================
-
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return "BOT ACTIVE"
-
-def run_flask():
-
-    app.run(
-        host="0.0.0.0",
-        port=int(os.environ.get("PORT", 10000))
-    )
-
-# =====================================================
-# TELEGRAM COMMANDS
-# =====================================================
-
-@bot.message_handler(commands=['start'])
-def start_command(message):
-
-    bot.reply_to(
-        message,
-        "✅ *BOT ACTIVE*\n\n🚀 AI Market Scanner Running 24/7",
-        parse_mode="Markdown"
-    )
-
-@bot.message_handler(commands=['status'])
-def status_command(message):
-
-    status_msg = (
-        "🤖 *BOT STATUS REPORT*\n\n"
-        "✅ Scanner Active\n"
-        "📈 RSI < 33\n"
-        "📊 ADX > 20\n"
-        "🐋 Whale Detection Enabled\n"
-        "⚡ High Accuracy Mode ON\n\n"
-        "🚨 Signal milte hi alert aayega."
-    )
-
-    bot.reply_to(
-        message,
-        status_msg,
-        parse_mode="Markdown"
-    )
-
-# =====================================================
-# STARTUP MESSAGE
-# =====================================================
-
-try:
-
-    bot.send_message(
-        CHAT_ID,
-        "✅ BOT STARTED SUCCESSFULLY\n📡 Scanner Online"
-    )
-
-except Exception as e:
-
-    print(e)
-
-# =====================================================
-# KUCOIN EXCHANGE
-# =====================================================
+# =========================================
+# EXCHANGE
+# =========================================
 
 exchange = ccxt.kucoin({
     'enableRateLimit': True,
-    'rateLimit': 3500,
-    'timeout': 60000,
-    'options': {
-        'adjustForTimeDifference': True
-    }
+    'rateLimit': 2000,
 })
 
-# =====================================================
-# COINS
-# =====================================================
+# =========================================
+# SETTINGS
+# =========================================
 
-coins = [
+RSI_LIMIT = 37
+ADX_MIN = 20
+VOLUME_SPIKE = 2.5
+MIN_PRICE_CHANGE = 1.5
 
-    'BTC/USDT','ETH/USDT','SOL/USDT','XRP/USDT',
-    'ADA/USDT','DOGE/USDT','AVAX/USDT','LINK/USDT',
-    'DOT/USDT','ATOM/USDT','NEAR/USDT','FIL/USDT',
-    'LTC/USDT','TRX/USDT','ETC/USDT','ICP/USDT',
-    'HBAR/USDT','SAND/USDT','AAVE/USDT','CRV/USDT',
-
-    'SNX/USDT','SUSHI/USDT','GRT/USDT','CHZ/USDT',
-    'RUNE/USDT','THETA/USDT','LRC/USDT','DASH/USDT',
-    'ZEC/USDT','NEO/USDT','XMR/USDT','IOTA/USDT',
-    'ICX/USDT','HNT/USDT','IOTX/USDT','STX/USDT',
-
-    'ARB/USDT','OP/USDT','APT/USDT','INJ/USDT',
-    'SEI/USDT','TIA/USDT','PEPE/USDT','BONK/USDT',
-    'WIF/USDT','FLOKI/USDT','JUP/USDT',
-
-    'PYTH/USDT','STRK/USDT','BLUR/USDT','DYDX/USDT',
-    'GMX/USDT','SUI/USDT','CFX/USDT','MASK/USDT',
-    'MAGIC/USDT','ACH/USDT','API3/USDT'
-]
-
-# =====================================================
-# MEMORY
-# =====================================================
+SCAN_DELAY = 15
 
 last_alerts = {}
 
-# =====================================================
-# MARKET SENTIMENT
-# =====================================================
+# =========================================
+# COMMANDS
+# =========================================
 
-def get_market_sentiment():
+@bot.message_handler(commands=['start', 'status'])
+def send_status(message):
+
+    status = (
+        "🤖 BOT ACTIVE\n\n"
+        "✅ Market Scanner Running\n"
+        "🚀 Explosive Momentum Detection Enabled\n"
+        "📊 Multi-Timeframe Analysis Active\n"
+        "🐋 Whale Candle Detection Active\n"
+        "🔥 Dynamic ATR TP/SL Enabled\n"
+        "⚡ Scanning Top Crypto Market Coins"
+    )
+
+    bot.reply_to(message, status)
+
+# =========================================
+# FETCH TOP COINS
+# =========================================
+
+def get_top_coins():
 
     try:
 
-        response = requests.get(
-            "https://api.alternative.me/fng/",
-            timeout=10
+        markets = exchange.load_markets()
+
+        pairs = []
+
+        for symbol in markets:
+
+            try:
+
+                if (
+                    symbol.endswith('/USDT')
+                    and markets[symbol]['active']
+                    and ':' not in symbol
+                ):
+
+                    pairs.append(symbol)
+
+            except:
+                pass
+
+        tickers = exchange.fetch_tickers(pairs)
+
+        ranked = sorted(
+            pairs,
+            key=lambda x: tickers[x]['quoteVolume']
+            if tickers[x]['quoteVolume']
+            else 0,
+            reverse=True
         )
 
-        return int(
-            response.json()['data'][0]['value']
+        return ranked[:120]
+
+    except Exception as e:
+
+        logging.error(f"Coin Fetch Error: {e}")
+
+        return []
+
+# =========================================
+# ANALYSIS
+# =========================================
+
+def explosive_scan(symbol):
+
+    global last_alerts
+
+    try:
+
+        # =====================================
+        # MAIN TIMEFRAME
+        # =====================================
+
+        ohlcv = exchange.fetch_ohlcv(
+            symbol,
+            timeframe='15m',
+            limit=220
         )
 
-    except Exception:
+        if not ohlcv or len(ohlcv) < 50:
+            return None
 
-        return 50
+        closes = [x[4] for x in ohlcv]
+        highs = [x[2] for x in ohlcv]
+        lows = [x[3] for x in ohlcv]
+        volumes = [x[5] for x in ohlcv]
 
-# =====================================================
-# RSI
-# =====================================================
+        price = closes[-1]
 
-def calculate_rsi(prices, period=14):
+        # =====================================
+        # BTC FILTER
+        # =====================================
 
-    delta = pd.Series(prices).diff()
+        btc_ohlcv = exchange.fetch_ohlcv(
+            'BTC/USDT',
+            timeframe='15m',
+            limit=50
+        )
 
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
+        btc_closes = [x[4] for x in btc_ohlcv]
 
-    avg_gain = gain.ewm(
-        alpha=1/period,
-        adjust=False
-    ).mean()
+        btc_ema20 = ta.trend.EMAIndicator(
+            pd.Series(btc_closes),
+            window=20
+        ).ema_indicator().iloc[-1]
 
-    avg_loss = loss.ewm(
-        alpha=1/period,
-        adjust=False
-    ).mean()
+        btc_price = btc_closes[-1]
 
-    rs = avg_gain / avg_loss
+        btc_trend_ok = btc_price > btc_ema20
 
-    rsi = 100 - (100 / (1 + rs))
+        # =====================================
+        # RSI
+        # =====================================
 
-    value = float(rsi.iloc[-1])
+        rsi = ta.momentum.RSIIndicator(
+            pd.Series(closes),
+            window=14
+        ).rsi().iloc[-1]
 
-    if pd.isna(value):
-        return 50
+        # =====================================
+        # EMA
+        # =====================================
 
-    return value
+        ema50 = ta.trend.EMAIndicator(
+            pd.Series(closes),
+            window=50
+        ).ema_indicator().iloc[-1]
 
-# =====================================================
-# EMA
-# =====================================================
+        ema200 = ta.trend.EMAIndicator(
+            pd.Series(closes),
+            window=200
+        ).ema_indicator().iloc[-1]
 
-def calculate_ema(prices, period):
+        # =====================================
+        # ADX
+        # =====================================
 
-    ema = pd.Series(prices).ewm(
-        span=period,
-        adjust=False
-    ).mean()
+        adx = ta.trend.ADXIndicator(
+            pd.Series(highs),
+            pd.Series(lows),
+            pd.Series(closes),
+            window=14
+        ).adx().iloc[-1]
 
-    return float(ema.iloc[-1])
+        # =====================================
+        # ATR
+        # =====================================
 
-# =====================================================
-# ATR
-# =====================================================
+        atr = ta.volatility.AverageTrueRange(
+            pd.Series(highs),
+            pd.Series(lows),
+            pd.Series(closes),
+            window=14
+        ).average_true_range().iloc[-1]
 
-def calculate_atr(ohlcv, period=14):
+        atr_percent = (atr / price) * 100
 
-    df = pd.DataFrame(
-        ohlcv,
-        columns=['t','o','h','l','c','v']
-    )
+        # =====================================
+        # VOLUME EXPLOSION
+        # =====================================
 
-    tr = pd.concat([
+        avg_volume = sum(volumes[-20:-1]) / 19
 
-        df['h'] - df['l'],
-        abs(df['h'] - df['c'].shift()),
-        abs(df['l'] - df['c'].shift())
+        volume_ratio = volumes[-1] / avg_volume
 
-    ], axis=1).max(axis=1)
+        # =====================================
+        # BREAKOUT DETECTION
+        # =====================================
 
-    atr = tr.rolling(period).mean()
+        recent_high = max(highs[-20:])
 
-    value = float(atr.iloc[-1])
+        breakout = price >= recent_high * 0.995
 
-    if pd.isna(value):
-        return 0
+        # =====================================
+        # PRICE CHANGE
+        # =====================================
 
-    return value
+        change_15m = (
+            (price - closes[-5]) / closes[-5]
+        ) * 100
 
-# =====================================================
-# ADX
-# =====================================================
+        change_1h = (
+            (price - closes[-20]) / closes[-20]
+        ) * 100
 
-def calculate_adx(ohlcv, period=14):
+        # =====================================
+        # WHALE CANDLE
+        # =====================================
 
-    df = pd.DataFrame(
-        ohlcv,
-        columns=['t','o','h','l','c','v']
-    )
+        candle_size = (
+            (ohlcv[-1][2] - ohlcv[-1][3])
+            / price
+        ) * 100
 
-    plus_dm = df['h'].diff()
-    minus_dm = df['l'].diff() * -1
+        # =====================================
+        # 1H TREND CONFIRMATION
+        # =====================================
 
-    plus_dm[plus_dm < 0] = 0
-    minus_dm[minus_dm < 0] = 0
+        ohlcv_1h = exchange.fetch_ohlcv(
+            symbol,
+            timeframe='1h',
+            limit=50
+        )
 
-    tr = pd.concat([
+        closes_1h = [x[4] for x in ohlcv_1h]
 
-        df['h'] - df['l'],
-        abs(df['h'] - df['c'].shift()),
-        abs(df['l'] - df['c'].shift())
+        ema_1h = ta.trend.EMAIndicator(
+            pd.Series(closes_1h),
+            window=20
+        ).ema_indicator().iloc[-1]
 
-    ], axis=1).max(axis=1)
+        trend_1h_ok = closes_1h[-1] > ema_1h
 
-    atr = tr.rolling(period).mean()
+        # =====================================
+        # FINAL CONDITIONS
+        # =====================================
 
-    plus_di = (
-        100 *
-        (plus_dm.rolling(period).mean() / atr)
-    )
+        if (
+            rsi < RSI_LIMIT
+            and adx > ADX_MIN
+            and volume_ratio > VOLUME_SPIKE
+            and breakout
+            and change_15m > MIN_PRICE_CHANGE
+            and ema50 > ema200
+            and btc_trend_ok
+            and trend_1h_ok
+            and candle_size > 2
+            and change_1h < 18
+        ):
 
-    minus_di = (
-        100 *
-        (minus_dm.rolling(period).mean() / atr)
-    )
+            # =================================
+            # ALERT COOLDOWN
+            # =================================
 
-    dx = (
-        abs(plus_di - minus_di) /
-        abs(plus_di + minus_di)
-    ) * 100
+            now = time.time()
 
-    adx = dx.rolling(period).mean()
+            if (
+                symbol in last_alerts
+                and now - last_alerts[symbol] < 7200
+            ):
+                return None
 
-    value = float(adx.iloc[-1])
+            last_alerts[symbol] = now
 
-    if pd.isna(value):
-        return 0
+            # =================================
+            # SCORING
+            # =================================
 
-    return value
+            score = 0
 
-# =====================================================
-# SEND SIGNAL
-# =====================================================
+            if volume_ratio > 4:
+                score += 3
 
-def send_signal(
-    symbol,
-    price,
-    rsi,
-    atr,
-    adx,
-    sentiment,
-    whale
-):
+            if adx > 25:
+                score += 2
 
-    sl = price - (atr * 1.5)
+            if atr_percent > 4:
+                score += 2
 
-    tp1 = price + (atr * 2)
-    tp2 = price + (atr * 4)
-    tp3 = price + (atr * 6)
+            if change_15m > 3:
+                score += 3
 
-    whale_text = (
-        "\n🐋 Whale Volume Detected"
-        if whale else ""
-    )
+            # =================================
+            # SIGNAL STRENGTH
+            # =================================
 
-    message = f"""
+            if score >= 8:
+                strength = "🚀 EXPLOSIVE"
 
-🚨 *ADVANCED AI SIGNAL*
+            elif score >= 5:
+                strength = "⚡ STRONG"
 
-🪙 {symbol}
+            else:
+                strength = "✅ NORMAL"
 
-💰 Entry: `{price:.5f}`
+            # =================================
+            # DYNAMIC TP/SL
+            # =================================
 
-📉 RSI: `{rsi:.2f}`
-📈 ADX: `{adx:.2f}`
+            tp1 = atr_percent * 1.5
+            tp2 = atr_percent * 3
+            tp3 = atr_percent * 5
 
-😨 Fear & Greed: `{sentiment}`
+            sl = atr_percent * 1.2
 
-{whale_text}
+            # =================================
+            # SIGNAL MESSAGE
+            # =================================
 
-🎯 TP1: `{tp1:.5f}`
-🎯 TP2: `{tp2:.5f}`
-🎯 TP3: `{tp3:.5f}`
+            signal = f"""
+🚨 EXPLOSIVE SIGNAL
 
-🛑 SL: `{sl:.5f}`
+🪙 Coin: {symbol}
 
-⚡ High Accuracy Signal
+💰 Price: {price:.6f}
 
+📈 15m Change: {change_15m:.2f}%
+📊 Volume Spike: {volume_ratio:.2f}x
+🔥 ADX: {adx:.2f}
+⚡ RSI: {rsi:.2f}
+
+🚀 Strength: {strength}
+
+🎯 TP1: +{tp1:.2f}%
+🎯 TP2: +{tp2:.2f}%
+🎯 TP3: +{tp3:.2f}%
+
+🛑 SL: -{sl:.2f}%
+
+⚠️ Use Proper Risk Management
 """
 
-    bot.send_message(
-        CHAT_ID,
-        message
-    )
+            return signal
 
-# =====================================================
-# MARKET ANALYZER
-# =====================================================
+    except Exception as e:
+
+        logging.error(f"{symbol} Error: {e}")
+
+    return None
+
+# =========================================
+# MARKET LOOP
+# =========================================
 
 def analyze_market():
 
@@ -375,210 +382,74 @@ def analyze_market():
 
         try:
 
-            logging.info("Scanning Market")
+            coins = get_top_coins()
 
-            sentiment = get_market_sentiment()
+            logging.info(
+                f"Scanning {len(coins)} coins..."
+            )
 
-            # EXTREME GREED FILTER
-            if sentiment >= 80:
-
-                logging.warning(
-                    "Extreme Greed Detected"
-                )
-
-                time.sleep(300)
-
-                continue
-
-            # BTC SAFETY CHECK
-            try:
-
-                btc = exchange.fetch_ohlcv(
-                    'BTC/USDT',
-                    TIMEFRAME,
-                    limit=3
-                )
-
-                if btc and len(btc) >= 2:
-
-                    btc_change = (
-                        btc[-1][4] - btc[-2][4]
-                    ) / btc[-2][4]
-
-                    if btc_change < -0.025:
-
-                        logging.warning(
-                            "BTC Dump Protection Active"
-                        )
-
-                        time.sleep(180)
-
-                        continue
-
-            except Exception as btc_error:
-
-                logging.warning(
-                    f"BTC CHECK FAILED: {btc_error}"
-                )
-
-            # COINS LOOP
             for symbol in coins:
 
                 try:
 
-                    # COOLDOWN
-                    if (
-                        time.time() -
-                        last_alerts.get(symbol, 0)
-                    ) < COOLDOWN:
-
-                        continue
-
-                    # FETCH DATA
-                    ohlcv = exchange.fetch_ohlcv(
-                        symbol,
-                        TIMEFRAME,
-                        limit=150
-                    )
-
-                    htf = exchange.fetch_ohlcv(
-                        symbol,
-                        HIGHER_TIMEFRAME,
-                        limit=150
-                    )
-
-                    if not ohlcv or not htf:
-                        continue
-
-                    closes = [x[4] for x in ohlcv]
-                    volumes = [x[5] for x in ohlcv]
-
-                    htf_closes = [x[4] for x in htf]
-
-                    price = closes[-1]
-
-                    # INDICATORS
-                    rsi = calculate_rsi(closes)
-
-                    atr = calculate_atr(ohlcv)
-
-                    adx = calculate_adx(ohlcv)
-
-                    ema50 = calculate_ema(closes, 50)
-                    ema200 = calculate_ema(closes, 200)
-
-                    htf_ema50 = calculate_ema(htf_closes, 50)
-                    htf_ema200 = calculate_ema(htf_closes, 200)
-
-                    # TREND FILTER
-                    trend_ok = (
-
-                        ema50 > ema200 and
-                        htf_ema50 > htf_ema200 and
-                        price > ema200
-
-                    )
-
-                    # VOLUME FILTER
-                    avg_volume = (
-                        sum(volumes[-15:-1]) / 14
-                    )
-
-                    volume_spike = (
-                        volumes[-1] >
-                        avg_volume * 2.2
-                    )
-
-                    whale = (
-                        volumes[-1] >
-                        avg_volume * 4
-                    )
-
-                    # FINAL SIGNAL
-                    signal = (
-
-                        rsi < RSI_LIMIT and
-                        adx > ADX_LIMIT and
-                        volume_spike and
-                        trend_ok and
-                        atr > 0
-
-                    )
+                    signal = explosive_scan(symbol)
 
                     if signal:
 
-                        send_signal(
-                            symbol,
-                            price,
-                            rsi,
-                            atr,
-                            adx,
-                            sentiment,
-                            whale
+                        bot.send_message(
+                            CHAT_ID,
+                            signal
                         )
 
-                        last_alerts[symbol] = time.time()
+                        logging.info(
+                            f"Signal Sent: {symbol}"
+                        )
 
                     time.sleep(SCAN_DELAY)
 
                 except Exception as e:
 
-                    error_text = str(e)
+                    logging.error(
+                        f"{symbol} Scan Error: {e}"
+                    )
 
-                    # RATE LIMIT FIX
-                    if "429" in error_text:
+                    continue
 
-                        logging.warning(
-                            "KUCOIN RATE LIMIT HIT - COOLING DOWN"
-                        )
+        except ccxt.RateLimitExceeded:
 
-                        time.sleep(180)
-
-                    # NETWORK ERROR
-                    elif "NetworkError" in error_text:
-
-                        logging.warning(
-                            "NETWORK ISSUE - RETRYING"
-                        )
-
-                        time.sleep(30)
-
-                    else:
-
-                        logging.error(
-                            traceback.format_exc()
-                        )
-
-                        time.sleep(5)
-
-        except Exception:
-
-            logging.error(
-                traceback.format_exc()
+            logging.warning(
+                "KuCoin Rate Limit Hit - Cooling Down"
             )
 
-            time.sleep(20)
+            time.sleep(90)
 
-# =====================================================
-# START BOT
-# =====================================================
+        except Exception as e:
 
-if __name__ == "__main__":
+            logging.error(
+                f"Main Loop Error: {e}"
+            )
 
-    threading.Thread(
-        target=run_flask,
-        daemon=True
-    ).start()
+            time.sleep(60)
 
-    threading.Thread(
-        target=analyze_market,
-        daemon=True
-    ).start()
+# =========================================
+# START MARKET THREAD
+# =========================================
 
-    print("BOT STARTED")
+market_thread = Thread(
+    target=analyze_market
+)
 
-    bot.infinity_polling(
-        timeout=30,
-        long_polling_timeout=30,
-        skip_pending=True
-    )
+market_thread.daemon = True
+
+market_thread.start()
+
+# =========================================
+# START TELEGRAM BOT
+# =========================================
+
+print("BOT RUNNING...")
+
+bot.infinity_polling(
+    timeout=60,
+    long_polling_timeout=60
+        )
