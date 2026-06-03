@@ -5,10 +5,11 @@ import logging
 import telebot
 import pandas as pd
 import ta
+
 from threading import Thread
 
 # =========================================
-# TELEGRAM
+# TELEGRAM CONFIG
 # =========================================
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -17,16 +18,23 @@ CHAT_ID = os.environ.get("CHAT_ID")
 bot = telebot.TeleBot(TOKEN)
 
 # =========================================
+# REMOVE WEBHOOK (FIX 409 ERROR)
+# =========================================
+
+bot.remove_webhook()
+time.sleep(2)
+
+# =========================================
 # LOGGING
 # =========================================
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s %(levelname)s %(message)s'
+    format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
 # =========================================
-# EXCHANGE
+# KUCOIN EXCHANGE
 # =========================================
 
 exchange = ccxt.kucoin({
@@ -48,23 +56,23 @@ SCAN_DELAY = 15
 last_alerts = {}
 
 # =========================================
-# COMMANDS
+# TELEGRAM COMMANDS
 # =========================================
 
 @bot.message_handler(commands=['start', 'status'])
 def send_status(message):
 
-    status = (
-        "🤖 BOT ACTIVE\n\n"
-        "✅ Market Scanner Running\n"
-        "🚀 Explosive Momentum Detection Enabled\n"
-        "📊 Multi-Timeframe Analysis Active\n"
-        "🐋 Whale Candle Detection Active\n"
-        "🔥 Dynamic ATR TP/SL Enabled\n"
-        "⚡ Scanning Top Crypto Market Coins"
+    msg = (
+        "🤖 BOT STATUS REPORT\n\n"
+        "✅ Scanner Active\n"
+        "🚀 Explosive Coin Detection ON\n"
+        "📊 Multi-Timeframe Analysis ON\n"
+        "🐋 Whale Candle Detection ON\n"
+        "🔥 Dynamic ATR TP/SL ON\n"
+        "⚡ Auto Market Scanner Running"
     )
 
-    bot.reply_to(message, status)
+    bot.reply_to(message, msg)
 
 # =========================================
 # FETCH TOP COINS
@@ -112,7 +120,7 @@ def get_top_coins():
         return []
 
 # =========================================
-# ANALYSIS
+# MAIN ANALYSIS
 # =========================================
 
 def explosive_scan(symbol):
@@ -122,7 +130,7 @@ def explosive_scan(symbol):
     try:
 
         # =====================================
-        # MAIN TIMEFRAME
+        # 15M DATA
         # =====================================
 
         ohlcv = exchange.fetch_ohlcv(
@@ -142,7 +150,7 @@ def explosive_scan(symbol):
         price = closes[-1]
 
         # =====================================
-        # BTC FILTER
+        # BTC TREND FILTER
         # =====================================
 
         btc_ohlcv = exchange.fetch_ohlcv(
@@ -210,15 +218,18 @@ def explosive_scan(symbol):
         atr_percent = (atr / price) * 100
 
         # =====================================
-        # VOLUME EXPLOSION
+        # VOLUME SPIKE
         # =====================================
 
         avg_volume = sum(volumes[-20:-1]) / 19
 
+        if avg_volume == 0:
+            return None
+
         volume_ratio = volumes[-1] / avg_volume
 
         # =====================================
-        # BREAKOUT DETECTION
+        # BREAKOUT
         # =====================================
 
         recent_high = max(highs[-20:])
@@ -226,7 +237,7 @@ def explosive_scan(symbol):
         breakout = price >= recent_high * 0.995
 
         # =====================================
-        # PRICE CHANGE
+        # PRICE MOMENTUM
         # =====================================
 
         change_15m = (
@@ -247,7 +258,7 @@ def explosive_scan(symbol):
         ) * 100
 
         # =====================================
-        # 1H TREND CONFIRMATION
+        # 1H CONFIRMATION
         # =====================================
 
         ohlcv_1h = exchange.fetch_ohlcv(
@@ -266,7 +277,7 @@ def explosive_scan(symbol):
         trend_1h_ok = closes_1h[-1] > ema_1h
 
         # =====================================
-        # FINAL CONDITIONS
+        # FINAL FILTER
         # =====================================
 
         if (
@@ -297,7 +308,7 @@ def explosive_scan(symbol):
             last_alerts[symbol] = now
 
             # =================================
-            # SCORING
+            # SCORE
             # =================================
 
             score = 0
@@ -341,7 +352,7 @@ def explosive_scan(symbol):
             # SIGNAL MESSAGE
             # =================================
 
-            signal = f"""
+            signal = f'''
 🚨 EXPLOSIVE SIGNAL
 
 🪙 Coin: {symbol}
@@ -362,9 +373,17 @@ def explosive_scan(symbol):
 🛑 SL: -{sl:.2f}%
 
 ⚠️ Use Proper Risk Management
-"""
+'''
 
             return signal
+
+    except ccxt.RateLimitExceeded:
+
+        logging.warning(
+            "KUCOIN RATE LIMIT HIT - COOLING DOWN"
+        )
+
+        time.sleep(90)
 
     except Exception as e:
 
@@ -373,7 +392,7 @@ def explosive_scan(symbol):
     return None
 
 # =========================================
-# MARKET LOOP
+# MAIN LOOP
 # =========================================
 
 def analyze_market():
@@ -415,14 +434,6 @@ def analyze_market():
 
                     continue
 
-        except ccxt.RateLimitExceeded:
-
-            logging.warning(
-                "KuCoin Rate Limit Hit - Cooling Down"
-            )
-
-            time.sleep(90)
-
         except Exception as e:
 
             logging.error(
@@ -432,7 +443,7 @@ def analyze_market():
             time.sleep(60)
 
 # =========================================
-# START MARKET THREAD
+# START THREAD
 # =========================================
 
 market_thread = Thread(
@@ -444,7 +455,7 @@ market_thread.daemon = True
 market_thread.start()
 
 # =========================================
-# START TELEGRAM BOT
+# START BOT
 # =========================================
 
 print("BOT RUNNING...")
@@ -452,4 +463,4 @@ print("BOT RUNNING...")
 bot.infinity_polling(
     timeout=60,
     long_polling_timeout=60
-        )
+)
