@@ -1,5 +1,5 @@
-pytelegrambotapi==4.15.4
-flask==3.0.3
 ccxt
+pyTelegramBotAPI
 pandas
-requests
+numpy
+ta==0.11.0
