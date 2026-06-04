@@ -1,5 +1,4 @@
-ccxt
-pyTelegramBotAPI
-pandas
-numpy
-ta==0.11.0
+ccxt>=4.3.0
+pyTelegramBotAPI>=4.21.0
+pandas>=2.2.0
+ta>=0.11.0
